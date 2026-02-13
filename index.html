@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEC Stock Ownership Lookup | W Advisors</title>
+    <style>
+        :root {
+            --navy: #1a2e4a;
+            --navy-light: #243d63;
+            --gold: #c5a55a;
+            --gold-light: #ddc07a;
+            --bg: #f5f6f8;
+            --card-bg: #ffffff;
+            --text: #2c3e50;
+            --text-muted: #6c7a89;
+            --success: #27ae60;
+            --success-bg: #eafaf1;
+            --error: #c0392b;
+            --error-bg: #fdf0ed;
+            --border: #e1e5eb;
+            --shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ââ Header ââ */
+        header {
+            background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+            color: white;
+            padding: 0;
+        }
+        .header-inner {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 28px 24px 24px;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 6px;
+        }
+        .brand-icon {
+            width: 38px; height: 38px;
+            background: var(--gold);
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 18px; color: var(--navy);
+        }
+        .brand h1 {
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+        .brand-sub {
+            font-size: 13px;
+            opacity: 0.7;
+            margin-left: 52px;
+        }
+
+        /* ââ Search Card ââ */
+        .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+        .search-card {
+            background: var(--card-bg);
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            padding: 28px 32px;
+            margin-bottom: 24px;
+        }
+        .search-card h2 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 18px;
+            color: var(--navy);
+        }
+        .form-row {
+            display: flex;
+            gap: 16px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+        .form-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1.5px solid var(--border);
+            border-radius: 6px;
+            font-size: 15px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+            outline: none;
+        }
+        .form-group input:focus {
+            border-color: var(--gold);
+        }
+        .form-group input::placeholder {
+            color: #b0b8c4;
+        }
+        .btn-search {
+            padding: 10px 28px;
+            background: var(--navy);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            white-space: nowrap;
+            height: 42px;
+        }
+        .btn-search:hover { background: var(--navy-light); }
+        .btn-search:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* ââ Status / Progress ââ */
+        .status-area {
+            margin-top: 20px;
+            display: none;
+        }
+        .status-area.visible { display: block; }
+
+        .progress-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        .progress-steps .step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .step .icon {
+            width: 18px; height: 18px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+        .step.done .icon { color: var(--success); }
+        .step.active .icon { color: var(--gold); }
+        .step.active { color: var(--text); font-weight: 500; }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            display: inline-block;
+            width: 14px; height: 14px;
+            border: 2px solid var(--border);
+            border-top-color: var(--gold);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        /* ââ Results ââ */
+        .result-card {
+            background: var(--card-bg);
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            margin-bottom: 24px;
+            display: none;
+        }
+        .result-card.visible { display: block; }
+
+        .result-header {
+            background: var(--success-bg);
+            border-bottom: 1px solid #c3e6cb;
+            padding: 18px 28px;
+        }
+        .result-header.error {
+            background: var(--error-bg);
+            border-bottom-color: #f5c6cb;
+        }
+        .result-summary {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--success);
+        }
+        .result-header.error .result-summary {
+            color: var(--error);
+        }
+        .result-meta {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .result-body {
+            padding: 24px 28px;
+        }
+
+        /* Detail grid */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .detail-item label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+        .detail-item .value {
+            font-size: 15px;
+            font-weight: 500;
+        }
+        .detail-item .value.shares {
+            font-size: 22px;
+            color: var(--navy);
+        }
+
+        /* Ownership table */
+        .table-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--navy);
+            margin-bottom: 12px;
+        }
+        .table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .table-wrap table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .table-wrap th {
+            background: #f0f2f5;
+            font-weight: 600;
+            text-align: left;
+            padding: 10px 14px;
+            border-bottom: 2px solid var(--border);
+            white-space: nowrap;
+        }
+        .table-wrap td {
+            padding: 9px 14px;
+            border-bottom: 1px solid #f0f2f5;
+        }
+        .table-wrap tr:last-child td { border-bottom: none; }
+        .table-wrap tr:hover td { background: #fafbfc; }
+        .table-wrap tr.highlight td {
+            background: #fff8e1;
+            font-weight: 600;
+        }
+
+        .filing-link {
+            display: inline-block;
+            margin-top: 16px;
+            font-size: 13px;
+            color: var(--navy);
+            text-decoration: none;
+            border-bottom: 1px dashed var(--navy);
+        }
+        .filing-link:hover { border-bottom-style: solid; }
+
+        /* ââ Calculator ââ */
+        .calc-card {
+            background: var(--card-bg);
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            margin-bottom: 24px;
+            display: none;
+        }
+        .calc-card.visible { display: block; }
+
+        .calc-header {
+            background: var(--navy);
+            color: white;
+            padding: 16px 28px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .calc-body {
+            padding: 24px 28px;
+        }
+        .calc-section {
+            margin-bottom: 22px;
+        }
+        .calc-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        .calc-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .calc-row label {
+            font-size: 14px;
+            min-width: 180px;
+            color: var(--text);
+        }
+        .calc-input {
+            width: 160px;
+            padding: 8px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            text-align: right;
+        }
+        .calc-input:focus { border-color: var(--gold); }
+        .calc-input::placeholder { color: #c5cbd3; }
+        .calc-input.subtract { border-left: 3px solid var(--error); }
+        .calc-input.add { border-left: 3px solid var(--success); }
+
+        .calc-divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 20px 0;
+        }
+
+        /* Result gauge */
+        .calc-result {
+            text-align: center;
+            padding: 20px;
+        }
+        .calc-pct {
+            font-size: 52px;
+            font-weight: 700;
+            line-height: 1;
+            margin-bottom: 6px;
+            transition: color 0.3s;
+        }
+        .calc-pct-label {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+        .severity-badge {
+            display: inline-block;
+            padding: 6px 18px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .severity-low {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .severity-medium {
+            background: #fff3e0;
+            color: #e65100;
+        }
+        .severity-high {
+            background: #fbe9e7;
+            color: #bf360c;
+        }
+
+        /* Pulsing glow for high severity */
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(191, 54, 12, 0.3); }
+            50% { box-shadow: 0 0 20px 6px rgba(191, 54, 12, 0.25); }
+        }
+        .severity-high-glow {
+            animation: pulseGlow 1.8s ease-in-out infinite;
+            border: 2px solid #bf360c;
+        }
+
+        .calc-breakdown {
+            margin-top: 18px;
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.7;
+        }
+        .calc-breakdown .num {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        @media (max-width: 600px) {
+            .calc-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+            .calc-row label { min-width: auto; }
+            .calc-input { width: 100%; }
+            .calc-body { padding: 20px 16px; }
+        }
+
+        /* ââ Error ââ */
+        .error-msg {
+            background: var(--error-bg);
+            color: var(--error);
+            padding: 14px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-top: 16px;
+            display: none;
+        }
+        .error-msg.visible { display: block; }
+
+        /* ââ Footer ââ */
+        footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        footer a { color: var(--navy); text-decoration: none; }
+
+        /* ââ Responsive ââ */
+        @media (max-width: 600px) {
+            .form-row { flex-direction: column; }
+            .btn-search { width: 100%; }
+            .header-inner { padding: 20px 16px; }
+            .search-card, .result-body { padding: 20px 16px; }
+            .detail-grid { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-inner">
+        <div class="brand">
+            <div class="brand-icon">W</div>
+            <h1>SEC Stock Ownership Lookup</h1>
+        </div>
+        <div class="brand-sub">Look up beneficial ownership from the latest DEF 14A proxy statement</div>
+    </div>
+</header>
+
+<div class="container">
+
+    <!-- Search -->
+    <div class="search-card">
+        <h2>Search</h2>
+        <form id="searchForm">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="ticker">Stock Ticker</label>
+                    <input type="text" id="ticker" placeholder="e.g. AAPL" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label for="person">Person Name</label>
+                    <input type="text" id="person" placeholder="e.g. Tim Cook" autocomplete="off" required>
+                </div>
+                <button type="submit" class="btn-search" id="searchBtn">Look Up</button>
+            </div>
+        </form>
+
+        <!-- Progress -->
+        <div class="status-area" id="statusArea">
+            <div class="progress-steps" id="progressSteps"></div>
+        </div>
+
+        <!-- Inline error -->
+        <div class="error-msg" id="errorMsg"></div>
+    </div>
+
+    <!-- Results -->
+    <div class="result-card" id="resultCard">
+        <div class="result-header" id="resultHeader">
+            <div class="result-summary" id="resultSummary"></div>
+            <div class="result-meta" id="resultMeta"></div>
+        </div>
+        <div class="result-body" id="resultBody"></div>
+    </div>
+
+    <!-- Sale Calculator -->
+    <div class="calc-card" id="calcCard">
+        <div class="calc-header">Sale &amp; Adjustment Calculator</div>
+        <div class="calc-body">
+            <div class="calc-section">
+                <div class="calc-section-title">Shares Sold</div>
+                <div class="calc-row">
+                    <label>How many shares did they sell?</label>
+                    <input type="text" class="calc-input subtract" id="calcSold" placeholder="0" oninput="recalculate()">
+                </div>
+            </div>
+
+            <hr class="calc-divider">
+
+            <div class="calc-section">
+                <div class="calc-section-title" id="adjustTitle">Any other adjustments since proxy?</div>
+                <div class="calc-row">
+                    <label style="color:var(--success);">+ Addition 1</label>
+                    <input type="text" class="calc-input add" id="calcAdd1" placeholder="0" oninput="recalculate()">
+                </div>
+                <div class="calc-row">
+                    <label style="color:var(--success);">+ Addition 2</label>
+                    <input type="text" class="calc-input add" id="calcAdd2" placeholder="0" oninput="recalculate()">
+                </div>
+                <div class="calc-row">
+                    <label style="color:var(--success);">+ Addition 3</label>
+                    <input type="text" class="calc-input add" id="calcAdd3" placeholder="0" oninput="recalculate()">
+                </div>
+                <div class="calc-row" style="margin-top: 12px;">
+                    <label style="color:var(--error);">&minus; Subtraction 1</label>
+                    <input type="text" class="calc-input subtract" id="calcSub1" placeholder="0" oninput="recalculate()">
+                </div>
+                <div class="calc-row">
+                    <label style="color:var(--error);">&minus; Subtraction 2</label>
+                    <input type="text" class="calc-input subtract" id="calcSub2" placeholder="0" oninput="recalculate()">
+                </div>
+                <div class="calc-row">
+                    <label style="color:var(--error);">&minus; Subtraction 3</label>
+                    <input type="text" class="calc-input subtract" id="calcSub3" placeholder="0" oninput="recalculate()">
+                </div>
+            </div>
+
+            <hr class="calc-divider">
+
+            <div class="calc-result" id="calcResult">
+                <div class="calc-pct" id="calcPct">0.0%</div>
+                <div class="calc-pct-label">of adjusted proxy stock sold</div>
+                <div id="calcBadge"></div>
+                <div class="calc-breakdown" id="calcBreakdown"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<footer>
+    W Advisors &mdash; Data sourced from <a href="https://www.sec.gov/edgar" target="_blank" rel="noopener">SEC EDGAR</a>.
+    Not investment advice.
+</footer>
+
+<script>
+// âââââââââââââââââââââââââââââââââââââââââââ
+// SEC Stock Ownership Lookup â Client-Side
+// âââââââââââââââââââââââââââââââââââââââââââ
+
+const HEADERS = {
+    'User-Agent': 'stock-lookup-web/1.0 (jacob@wadvisorslp.com)',
+    'Accept': 'application/json',
+};
+
+// SEC EDGAR enforces 10 req/sec; small helper to pace requests
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ââ UI helpers ââ
+const $ = id => document.getElementById(id);
+function showStatus(show) {
+    $('statusArea').classList.toggle('visible', show);
+}
+
+function setSteps(steps) {
+    $('progressSteps').innerHTML = steps.map(s => {
+        const icon = s.status === 'done' ? &#10003;'
+                    : s.status === 'active' ? '<span class="spinner"></span>'
+                    : '&#8226;';
+        return `<div class="step ${s.status}"><span class="icon">${icon}</span>${s.label}</div>`;
+    }).join('');
+}
+
+function showError(msg) {
+    const el = $('errorMsg');
+    el.textContent = msg;
+    el.classList.add('visible');
+}
+function clearError() {
+    $('errorMsg').classList.remove('visible');
+}
+
+function showResult(show) {
+    $('resultCard').classList.toggle('visible', show);
+}
+
+// ââ Fetch with SEC-friendly headers ââ
+async function secFetch(url, opts = {}) {
+    // Note: browsers strip custom User-Agent, but we include it anyway
+    // for non-browser contexts. SEC allows public CORS access to these endpoints.
+    const resp = await fetch(url, { ...opts });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
+    return resp;
+}
+
+// ââ Step 1: Resolve ticker â CIKâ
+function resolveTicker(ticker) {
+    const resp = await secFetch('https://www.sec.gov/files/company_tickers.json');
+    const data = await resp.json();
+    const upper = ticker.toUpperCase().trim();
+    for (const entry of Object.values(data)) {
+        if (entry.ticker.toUpperCase() === upper) {
+            return {
+                cik: String(entry.cik_str).padStart(10, '0'),
+                company: entry.title
+            };
+        }
+    }
+    throw new Error(`Ticker "${ticker}" not found in the SEC database.`);
+}
+
+// ââ Step 2: Find latest DEF 14A ââ
+async function findLatestProxy(cik) {
+    const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
+    const resp = await secFetch(url);
+    const data = await resp.json();
+
+    const recent = data?.filings?.recent || {};
+    const forms = recent.form || [];
+    const accessions = recent.accessionNumber || [];
+    const dates = recent.filingDate || [];
+    const docs = recent.primaryDocument || [];
+
+    for (let i = 0; i < forms.length; i++) {
+        if (forms[i] === 'DEF 14A') {
+            return { adsh: accessions[i], filename: docs[i], fileDate: dates[i] };
+        }
+    }
+    throw new Error('No DEF 14A proxy filing found for this company.');
+}
+
+// ââ Step 3: Build URL & fetch proxy HTML ââ
+function buildDocUrl(cik, adsh, filename) {
+    const cikBare = cik.replace(/^0+/, '');
+    const adshNoDash = adsh.replace(/-/g, '');
+    return `https://www.sec.gov/Archives/edgar/data/${cikBare}/${adshNoDash}/${filename}`;
+}
+
+async function fetchProxyHtml(url) {
+    const resp = await secFetch(url);
+    return await resp.text();
+}
+
+// ââ Step 4: Parse ownership tables ââ*function cleanText(t) { return t.replace(/\s+/g, ' ').trim(); }
+
+function extractNumber(text) {
+    let c = text.replace(/\(([^)]*)\)/g, '').replace(/[*â â¡Â§]/g, '').trim();
+    if (['\u2014', '\u2013', '-', ''].includes(c)) return null;
+    const m = c.match(/[\d,]+/);
+    if (m) {
+        const n = parseInt(m[0].replace(/,/g, ''), 10);
+        return isNaN(n) ? null : n;
+    }
+    return null;
+}
+
+function nameMatches(cellText, personName) {
+    const cell = cleanText(cellText).toLowerCase();
+    const name = personName.toLowerCase().trim();
+    if (cell.includes(name)) return true;
+    const parts = name.split(/\s+/);
+    if (parts.length >= 2) {
+        let last = parts[parts.length - 1].replace(/,/, '');
+        let first = parts[0];
+        const suffixes = ['jr', 'jr.', 'sr', 'sr.', 'ii', 'iii', 'iv'];
+        if (suffixes.includes(last) && parts.length >= 3) last = parts[parts.length - 2].replace(/,/, '');
+        if (suffixes.includes(first) && parts.length >= 3) first = parts[1];
+        if (cell.includes(last) && cell.includes(first)) return true;
+        if (last.length >= 4 && cell.includes(last)) return true;
+    }
+    return false;
+}
+
+function parseOwnershipFromHtml(html, personName) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const tables = doc.querySelectorAll('table');
+    const ownershipTables = [];
+
+    for (const table of tables) {
+        const txt = cleanText(table.textContent).toLowerCase();
+        if ((txt.includes('beneficial own') || txt.includes('amount and nature'))
+            && txt.includes('name')
+            && /\d{1,3}(,\d{3})+/.test(table.textContent)) {
+            ownershipTables.push(table);
+        }
+    }
+
+    if (ownershipTables.length === 0) return { found: false, tables: [] };
+
+    // For each ownership table, extract all rows as structured data
+    const allTableData = [];
+
+    for (const table of ownershipTables) {
+        const rows = table.querySelectorAll('tr');
+        let headerTexts = [];
+        let beneficialCol = null;
+        let dataRows = [];
+        let matchedRow = null;
+        let matchedShares = null;
+
+        // Find header
+        for (const row of rows) {
+            const cells = row.querySelectorAll('th, td');
+            const texts = Array.from(cells).map(c => cleanText(c.textContent));
+            const joined = texts.join(' ').toLowerCase();
+            if (joined.includes('beneficial own') || joined.includes('amount and nature')) {
+                headerTexts = texts;
+                for (let j = 0; j < texts.length; j++) {
+                    if (texts[j].toLowerCase().includes('beneficial own') ||
+                        texts[j].toLowerCase().includes('amount and nature')) {
+                        beneficialCol = j;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        // If no explicit header found, try first row with multiple th
+        if (headerTexts.length === 0) {
+            for (const row of rows) {
+                const ths = row.querySelectorAll('th');
+                if (ths.length >= 2) {
+                    headerTexts = Array.from(ths).map(c => cleanText(c.textContent));
+                    break;
+                }
+            }
+        }
+
+        // Extract data rows
+        for (const row of rows) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 2) continue;
+            const texts = Array.from(cells).map(c => cleanText(c.textContent));
+            // Skip empty or header-like rows
+            if (!texts[0] || texts[0].length < 2) continue;
+
+            const rowData = { name: texts[0], cells: texts, isMatch: false };
+
+            if (nameMatches(texts[0], personName)) {
+                rowData.isMatch = true;
+                // Extract shares
+                if (beneficialCol !== null && beneficialCol < texts.length) {
+                    matchedShares = extractNumber(texts[beneficialCol]);
+                }
+                if (matchedShares === null) {
+                    for (let j = 1; j < texts.length; j++) {
+                        const n = extractNumber(texts[j]);
+                        if (n !== null && n > 0) { matchedShares = n; break; }
+                    }
+                }
+                matchedRow = rowData;
+            }
+            dataRows.push(rowData);
+        }
+
+        // Find as-of date from preceding text
+        let asOfDate = 'Date not found';
+        // Walk backwards in the full doc looking for "as of" near this table
+        // We'll use a simple approach: search the full HTML before the table
+        const tableHtml = table.outerHTML;
+        const tablePos = html.indexOf(tableHtml.substring(0, 80));
+        if (tablePos > 0) {
+            const preceding = html.substring(Math.max(0, tablePos - 4000), tablePos);
+            const plainPreceding = preceding.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+            const dateMatches = [...plainPreceding.matchAll(/as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+            if (dateMatches.length > 0) {
+                asOfDate = dateMatches[dateMatches.length - 1][1].trim();
+            }
+        }
+
+        allTableData.push({
+            headers: headerTexts,
+            rows: dataRows,
+            matchedRow,
+            matchedShares,
+            asOfDate,
+            beneficialCol
+        });
+    }
+
+    // Find the table with the match
+    const matchedTable = allTableData.find(t => t.matchedRow !== null);
+    return {
+        found: matchedTable !== null,
+        matchedShares: matchedTable?.matchedShares ?? null,
+        asOfDate: matchedTable?.asOfDate ?? 'Date not found',
+        tables: allTableData,
+        matchedTableIndex: matchedTable ? allTableData.indexOf(matchedTable) : 0
+    }
+}
+
+// ââ Render results ââ
+function renderResults(result, company, ticker, personName, fileDate, docUrl) {
+    showResult(true);
+    const header = $('resultHeader');
+    const summary = $('resultSummary');
+    const meta = $('resultMeta');
+    const body = $('resultBody');
+    if (result.found && result.matchedShares !== null) {
+        header.className = 'result-header';
+        summary.textContent = `${personName} beneficially owns ${result.matchedShares.toLocaleString()} shares`;
+        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· As of ${result.asOfDate} â³ Source: DEF 14A filed ${fileDate}`;
+    } else if (result.found) {
+        header.className = 'result-header';
+        summary.textContent = `${personName} found in ownership table (share count unclear);
+        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· As of ${result.asOfDate} Â· Source: DEF 14A filed ${fileDate}`;
+    } else {
+        header.className = 'result-header error';
+        summary.textContent = `"${personName}" not found in the beneficial ownership tables`;
+        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· Searched ${result.tables.length} table(s)`;
+    }
+
+    // Build body
+    let html = '';
+
+    if (result.found && result.matchedShares !== null) {
+        html += `<div class="detail-grid">
+            <div class="detail-item"><label>Company</label><div class="value">${company}</div></div>
+            <div class="detail-item"><label>Ticker</label><div class="value">${ticker.toUpperCase()}</div></div>
+            <div class="detail-item"><label>Shares Owned</label><div class="value shares">${result.matchedShares.toLocaleString()}</div></div>
+            <div class="detail-item"><label>As Of</label><div class="value">${result.asOfDate}</div></div>
+            <div class="detail-item"><label>Filing Date</label><div class="value">${fileDate}</div></div>
+            <div class="detail-item"><label>Filing Type</label><div class="value">DEF 14A</div></div>
+        </div>`;
+    }
+
+    // Render the matched table (or first table)
+    const tIdx = result.matchedTableIndex ?? 0;
+    const tbl = result.tables[tIdx];
+    if (tbl && tbl.rows.length > 0) {
+        html += `<div class="table-section"><h3>Beneficial Ownership Table</h3><div class="table-wrap"><table>`;
+        if (tbl.headers.length > 0) {
+            html += '<thead><tr>' + tbl.headers.map(h => `<th>${escHtml(h)}</th>`).join('') + '</tr></thead>';      }
+        html += '<tbody>';
+        for (const row of tbl.rows) {
+            const cls = row.isMatch ? ' class="highlight"' : '';
+            html += `<tr${cls}>` + row.cells.map(c => `<td>${escHtml(c)}</td>`).join('') + '</tr>';
+        }
+        html += '</tbody></table></div></div>';
+    }
+
+    html += `<a class="filing-link" href="${docUrl}" target="_blank" rel="noopener">View full SEC filing on EDGAR &rarr;</a>`;
+
+    body.innerHTML = html;
+}
+
+function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ââ Calculator ââ
+let calcProxyShares = 0;
+let calcAsOfDate = '';
+
+function parseCalcInput(id) {
+    const raw = $(id).value.replace(/,/g, '').trim();
+    const n = parseInt(raw, 10);
+    return isNaN(n) || n < 0 ? 0 : n;
+}
+
+function recalculate() {
+    const sold = parseCalcInput('calcSold');
+    const add1 = parseCalcInput('calcAdd1');
+    const add2 = parseCalcInput('calcAdd2');
+    const add3 = parseCalcInput('calcAdd3');
+    const sub1 = parseCalcInput('calcSub1');
+    const sub2 = parseCalcInput('calcSub2');
+    const sub3 = parseCalcInput('calcSub3');
+
+    const totalAdded = add1 + add2 + add3;
+    const totalSubtracted = sub1 + sub2 + sub3;
+    const adjustedBase = calcProxyShares + totalAdded - totalSubtracted;
+
+    let pct = 0;
+    if (adjustedBase > 0 && sold > 0) {
+        pct = (sold / adjustedBase) * 100;
+    }
+
+    // Display percentage
+    const pctEl = $('calcPct');
+    pctEl.textContent = pct.toFixed(1) + '%';
+
+    // Severity
+    const badgeEl = $('calcBadge');
+    const resultEl = $('calcResult');
+    resultEl.classList.remove('severity-high-glow');
+
+    if (sold === 0) {
+        pctEl.style.color = 'var(--text-muted)';
+        badgeEl.innerHTML = '';
+    } else if (pct < 10) {
+        pctEl.style.color = '#2e7d32';
+        badgeEl.innerHTML = '<span class="severity-badge severity-low">Low â under 10%</span>';
+    } else if (pct <= 30) {
+        pctEl.style.color = '#e65100';
+        badgeEl.innerHTML = '<span class="severity-badge severity-medium">Medium â 10% to 30%</span>';
+    } else {
+        pctEl.style.color = '#bf360c';
+        badgeEl.innerHTML = '<span class="severity-badge severity-high">Significant â over 30%</span>';
+        resultEl.classList.add('severity-high-glow');
+    }
+
+    // Breakdown
+    const bk = $('calcBreakdown');
+    let lines = `Proxy ownership: <span class="num">${calcProxyShares.toLocaleString()}</span> shares`;
+    if (totalAdded > 0) lines += ` &nbsp;+&nbsp; <span class="num">${totalAdded.toLocaleString()}</span> added`;
+    if (totalSubtracted > 0) lines += ` &nbsp;&minus;&nbsp; <span class="num">${totalSubtracted.toLocaleString()}</span> subtracted`;
+    lines += ` &nbsp;=&nbsp; <span class="num">${adjustedBase.toLocaleString()}</span> adjusted base`;
+    if (sold > 0) lines += `<br>Sold <span class="num">${sold.toLocaleString()}</span> of <span class="num">${adjustedBase.toLocaleString()}</span> adjusted shares`;
+    bk.innerHTML = lines;
+}
+
+function showCalc(proxyShares, asOfDate) {
+    calcProxyShares = proxyShares;
+    calcAsOfDate = asOfDate;
+    $('adjustTitle').textContent = `Any other adjustments since ${asOfDate}?`;
+    // Reset inputs
+    ['calcSold','calcAdd1','calcAdd2','calcAdd3','calcSub1','calcSub2','calcSub3'].forEach(id => $(id).value = '');
+    $('calcCard').classList.add('visible');
+    recalculate();
+}
+
+function hideCalc() {
+    $('calcCard').classList.remove('visible');
+}
+
+// ââ Main search flow ââ
+$('searchForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ticker = $('ticker').value.trim();
+    const personName = $('person').value.trim();
+    if (!ticker || !personName) return;
+
+    clearError();
+    showResult(false);
+    hideCalc();
+    showStatus(true);
+    $('searchBtn').disabled = true;
+
+    const steps = [
+        { label: `Resolving ticker ${ticker.toUpperCase()} ...`, status: 'active' },
+        { label: 'Finding latest DEF 14A filing', status: 'pending' },
+        { label: 'Fetching proxy document', status: 'pending' },
+        { label: 'Parsing ownership tables', status: 'pending' },
+    ];
+
+    const updateStep = (idx, status) => { steps[idx].status = status; setSteps(steps); };
+    setSteps(steps);
+
+    try {
+        // Step 1
+        const { cik, company } = await resolveTicker(ticker);
+        updateStep(0, 'done');
+        steps[0].label = `${company} (CIK ${cik})`;
+        updateStep(1, 'active');
+        setSteps(steps);
+        await delay(200);
+
+        // Step 2
+        const { adsh, filename, fileDate } = await findLatestProxy(cik);
+        updateStep(1, 'done');
+        steps[1].label = `DEF 14A filed ${fileDate}`;
+        updateStep(2, 'active');
+        setSteps(steps);
+
+        // Step 3
+        const docUrl = buildDocUrl(cik, adsh, filename);
+        const html = await fetchProxyHtml(docUrl);
+        updateStep(2, 'done');
+        updateStep(3, 'active');
+        setSteps(steps);
+        await delay(100);
+
+        // Step 4
+        const result = parseOwnershipFromHtml(html, personName);
+        updateStep(3, 'done');
+        steps[3].label = `Found ${result.tables.length} ownership table(s)`;
+        setSteps(steps);
+
+        renderResults(result, company, ticker, personName, fileDate, docUrl);
+
+        // Show calculator if we found shares
+        if (result.found && result.matchedShares !== null) {
+            showCalc(result.matchedShares, result.asOfDate);
+        } else {
+            hideCalc();
+        }
+
+    } catch (err) {
+        showError(err.message);
+        // Mark current active step as failed
+        for (const s of steps) { if (s.status === 'active') s.status = 'done'; }
+        setSteps(steps);
+    } finally {
+        $('searchBtn').disabled = false;
+    }
+});
+</script>
+
+</body>
+</html>
