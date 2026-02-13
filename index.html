@@ -49,11 +49,11 @@
             margin-bottom: 6px;
         }
         .brand-icon {
-            width: 38px; height: 38px;
-            background: var(--gold);
-            border-radius: 6px;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: 700; font-size: 18px; color: var(--navy);
+            width: 42px; height: 42px;
+            flex-shrink: 0;
+        }
+        .brand-icon img, .brand-icon svg {
+            width: 100%; height: 100%;
         }
         .brand h1 {
             font-size: 22px;
@@ -451,7 +451,16 @@
 <header>
     <div class="header-inner">
         <div class="brand">
-            <div class="brand-icon">W</div>
+            <div class="brand-icon"><svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg">
+              <polygon points="15,40 50,25 85,40 85,45 15,45" fill="#5b8ca8"/>
+              <rect x="25" y="0" width="12" height="30" rx="1" fill="#3a6e8c"/>
+              <rect x="63" y="0" width="12" height="30" rx="1" fill="#3a6e8c"/>
+              <polygon points="10,45 50,32 90,45 90,55 10,55" fill="#6a9db5"/>
+              <polygon points="8,55 50,43 92,55 92,65 8,65" fill="#7fb3c4"/>
+              <polygon points="5,65 50,53 95,65 95,78 5,78" fill="#5a8fa3"/>
+              <polygon points="3,78 50,67 97,78 97,90 3,90" fill="#89bcc9"/>
+              <polygon points="0,90 50,80 100,90 100,105 0,105" fill="#a3cdd7"/>
+            </svg></div>
             <h1>SEC Stock Ownership Lookup</h1>
         </div>
         <div class="brand-sub">Look up beneficial ownership from the latest DEF 14A proxy statement</div>
@@ -569,15 +578,16 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ââ UI helpers ââ
 const $ = id => document.getElementById(id);
+
 function showStatus(show) {
     $('statusArea').classList.toggle('visible', show);
 }
 
 function setSteps(steps) {
     $('progressSteps').innerHTML = steps.map(s => {
-        const icon = s.status === 'done' ? &#10003;'
-                    : s.status === 'active' ? '<span class="spinner"></span>'
-                    : '&#8226;';
+        const icon = s.status === 'done' ? '&#10003;'
+                   : s.status === 'active' ? '<span class="spinner"></span>'
+                   : '&#8226;';
         return `<div class="step ${s.status}"><span class="icon">${icon}</span>${s.label}</div>`;
     }).join('');
 }
@@ -604,8 +614,8 @@ async function secFetch(url, opts = {}) {
     return resp;
 }
 
-// ââ Step 1: Resolve ticker â CIKâ
-function resolveTicker(ticker) {
+// ââ Step 1: Resolve ticker â CIK ââ
+async function resolveTicker(ticker) {
     const resp = await secFetch('https://www.sec.gov/files/company_tickers.json');
     const data = await resp.json();
     const upper = ticker.toUpperCase().trim();
@@ -652,10 +662,11 @@ async function fetchProxyHtml(url) {
     return await resp.text();
 }
 
-// ââ Step 4: Parse ownership tables ââ*function cleanText(t) { return t.replace(/\s+/g, ' ').trim(); }
+// ââ Step 4: Parse ownership tables ââ
+function cleanText(t) { return t.replace(/\s+/g, ' ').trim(); }
 
 function extractNumber(text) {
-    let c = text.replace(/\(([^)]*)\)/g, '').replace(/[*â â¡Â§]/g, '').trim();
+    let c = text.replace(/\([^)]*\)/g, '').replace(/[*â â¡Â§]/g, '').trim();
     if (['\u2014', '\u2013', '-', ''].includes(c)) return null;
     const m = c.match(/[\d,]+/);
     if (m) {
@@ -798,7 +809,7 @@ function parseOwnershipFromHtml(html, personName) {
         asOfDate: matchedTable?.asOfDate ?? 'Date not found',
         tables: allTableData,
         matchedTableIndex: matchedTable ? allTableData.indexOf(matchedTable) : 0
-    }
+    };
 }
 
 // ââ Render results ââ
@@ -808,14 +819,15 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl) {
     const summary = $('resultSummary');
     const meta = $('resultMeta');
     const body = $('resultBody');
+
     if (result.found && result.matchedShares !== null) {
         header.className = 'result-header';
         summary.textContent = `${personName} beneficially owns ${result.matchedShares.toLocaleString()} shares`;
-        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· As of ${result.asOfDate} â³ Source: DEF 14A filed ${fileDate}`;
+        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· As of ${result.asOfDate} Â· Source: DEF 14A filed ${fileDate}`;
     } else if (result.found) {
         header.className = 'result-header';
-        summary.textContent = `${personName} found in ownership table (share count unclear);
-        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· As of ${result.asOfDate} Â· Source: DEF 14A filed ${fileDate}`;
+        summary.textContent = `${personName} found in ownership table (share count unclear)`;
+        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· Source: DEF 14A filed ${fileDate}`;
     } else {
         header.className = 'result-header error';
         summary.textContent = `"${personName}" not found in the beneficial ownership tables`;
@@ -842,7 +854,8 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl) {
     if (tbl && tbl.rows.length > 0) {
         html += `<div class="table-section"><h3>Beneficial Ownership Table</h3><div class="table-wrap"><table>`;
         if (tbl.headers.length > 0) {
-            html += '<thead><tr>' + tbl.headers.map(h => `<th>${escHtml(h)}</th>`).join('') + '</tr></thead>';      }
+            html += '<thead><tr>' + tbl.headers.map(h => `<th>${escHtml(h)}</th>`).join('') + '</tr></thead>';
+        }
         html += '<tbody>';
         for (const row of tbl.rows) {
             const cls = row.isMatch ? ' class="highlight"' : '';
@@ -1011,3 +1024,4 @@ $('searchForm').addEventListener('submit', async (e) => {
 
 </body>
 </html>
+
