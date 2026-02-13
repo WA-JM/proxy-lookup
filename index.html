@@ -694,6 +694,53 @@ function nameMatches(cellText, personName) {
     return false;
 }
 
+function findAsOfDate(text) {
+    const plain = text.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
+    const p1 = [...plain.matchAll(/as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+    const p2 = [...plain.matchAll(/as\s+of\s+(\w+\s+\d{1,2}\s+\d{4})/gi)];
+    const p3 = [...plain.matchAll(/as\s+of\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/gi)];
+    const p4 = [...plain.matchAll(/record\s+date[^.]*?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+    const p5 = [...plain.matchAll(/beneficial\s+own[^.]*?as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+    const allFound = [...p1, ...p2, ...p3, ...p4, ...p5];
+    if (allFound.length > 0) return allFound[allFound.length - 1][1].trim();
+    return null;
+}
+
+// Find ownership tables in raw HTML and return their positions
+function findOwnershipTablePositions(html) {
+    const positions = [];
+    const tableRegex = /<table\b[^>]*>/gi;
+    let match;
+    while ((match = tableRegex.exec(html)) !== null) {
+        const tableStart = match.index;
+        // Find the closing </table> — handle nested tables by counting
+        let depth = 1;
+        let pos = tableStart + match[0].length;
+        while (depth > 0 && pos < html.length) {
+            const nextOpen = html.indexOf('<table', pos);
+            const nextClose = html.indexOf('</table', pos);
+            if (nextClose === -1) break;
+            if (nextOpen !== -1 && nextOpen < nextClose) {
+                depth++;
+                pos = nextOpen + 6;
+            } else {
+                depth--;
+                pos = nextClose + 8;
+            }
+        }
+        const tableEnd = pos;
+        const tableHtml = html.substring(tableStart, tableEnd);
+        const tableText = tableHtml.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').toLowerCase();
+
+        if ((tableText.includes('beneficial own') || tableText.includes('amount and nature'))
+            && tableText.includes('name')
+            && /\d{1,3}(,\d{3})+/.test(tableHtml)) {
+            positions.push({ start: tableStart, end: tableEnd, html: tableHtml });
+        }
+    }
+    return positions;
+}
+
 function parseOwnershipFromHtml(html, personName) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const tables = doc.querySelectorAll('table');
@@ -710,10 +757,14 @@ function parseOwnershipFromHtml(html, personName) {
 
     if (ownershipTables.length === 0) return { found: false, tables: [] };
 
+    // Find ownership table positions in raw HTML for section extraction
+    const rawTablePositions = findOwnershipTablePositions(html);
+
     // For each ownership table, extract all rows as structured data
     const allTableData = [];
 
-    for (const table of ownershipTables) {
+    for (let tblIdx = 0; tblIdx < ownershipTables.length; tblIdx++) {
+        const table = ownershipTables[tblIdx];
         const rows = table.querySelectorAll('tr');
         let headerTexts = [];
         let beneficialCol = null;
@@ -755,14 +806,12 @@ function parseOwnershipFromHtml(html, personName) {
             const cells = row.querySelectorAll('td');
             if (cells.length < 2) continue;
             const texts = Array.from(cells).map(c => cleanText(c.textContent));
-            // Skip empty or header-like rows
             if (!texts[0] || texts[0].length < 2) continue;
 
             const rowData = { name: texts[0], cells: texts, isMatch: false };
 
             if (nameMatches(texts[0], personName)) {
                 rowData.isMatch = true;
-                // Extract shares
                 if (beneficialCol !== null && beneficialCol < texts.length) {
                     matchedShares = extractNumber(texts[beneficialCol]);
                 }
@@ -777,80 +826,43 @@ function parseOwnershipFromHtml(html, personName) {
             dataRows.push(rowData);
         }
 
-        // Find as-of date from preceding text
+        // Use raw HTML positions for section extraction and date finding
+        const rawPos = rawTablePositions[tblIdx] || null;
+
+        // Find as-of date
         let asOfDate = 'Date not found';
-        const tableHtml = table.outerHTML;
-        const tablePos = html.indexOf(tableHtml.substring(0, 80));
-
-        // Helper: search text for as-of date patterns
-        function findAsOfDate(text) {
-            const plain = text.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
-            // Pattern 1: "as of [Month Day, Year]"
-            const p1 = [...plain.matchAll(/as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-            // Pattern 2: "as of [Month Day Year]" (no comma)
-            const p2 = [...plain.matchAll(/as\s+of\s+(\w+\s+\d{1,2}\s+\d{4})/gi)];
-            // Pattern 3: "as of [MM/DD/YYYY]"
-            const p3 = [...plain.matchAll(/as\s+of\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/gi)];
-            // Pattern 4: "record date" patterns
-            const p4 = [...plain.matchAll(/record\s+date[^.]*?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-            // Pattern 5: "ownership of common stock as of" or "beneficial ownership...as of"
-            const p5 = [...plain.matchAll(/beneficial\s+own[^.]*?as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-            const allFound = [...p1, ...p2, ...p3, ...p4, ...p5];
-            if (allFound.length > 0) {
-                return allFound[allFound.length - 1][1].trim();
-            }
-            return null;
-        }
-
-        // First: search preceding text (up to 10000 chars before the table)
-        if (tablePos > 0) {
-            const preceding = html.substring(Math.max(0, tablePos - 10000), tablePos);
+        if (rawPos) {
+            const preceding = html.substring(Math.max(0, rawPos.start - 10000), rawPos.start);
             asOfDate = findAsOfDate(preceding) || asOfDate;
         }
-        // Fallback: search the whole document for the "beneficial ownership" section "as of" date
         if (asOfDate === 'Date not found') {
-            const fullPlain = html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
-            const boMatches = [...fullPlain.matchAll(/beneficial\s+own[^.]*?as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-            if (boMatches.length > 0) asOfDate = boMatches[boMatches.length - 1][1].trim();
+            // Fallback: search the whole document
+            asOfDate = findAsOfDate(html) || asOfDate;
         }
 
-        // Extract the raw HTML section: table + footnotes that follow
+        // Extract raw HTML section: table + footnotes after it
         let rawSectionHtml = '';
-        const tableOuterHtml = table.outerHTML;
-        const tblPos = html.indexOf(tableOuterHtml.substring(0, 80));
-        if (tblPos > -1) {
-            // Start right at the table — don't try to grab headings before it
-            // (the heading search was grabbing too much irrelevant content)
-            let sectionStart = tblPos;
+        if (rawPos) {
+            const afterStart = rawPos.end;
+            const afterChunk = html.substring(afterStart, afterStart + 15000);
 
-            // After the table, grab footnotes (typically <p> or <div> with footnote numbers)
-            const afterTableStart = tblPos + tableOuterHtml.length;
-            const afterChunk = html.substring(afterTableStart, afterTableStart + 15000);
-
-            // Find where footnotes end: look for next major heading or next table
-            let footnoteEnd = 0;
-            // Match headings (h1-h4) or bold section titles
-            const nextSectionMatch = afterChunk.match(/<(?:h[1-4])\b[^>]*>/i);
-            const nextTableMatch = afterChunk.match(/<table\b/i);
-
-            // Also look for a clear section break (like centered bold text for a new section)
-            const nextBoldSectionMatch = afterChunk.match(/<p[^>]*>\s*<b[^>]*>[^<]{5,80}<\/b>\s*<\/p>/i);
-
+            // Find where footnotes end
             const boundaries = [];
-            if (nextSectionMatch) boundaries.push(nextSectionMatch.index);
-            if (nextTableMatch) boundaries.push(nextTableMatch.index);
-            if (nextBoldSectionMatch && nextBoldSectionMatch.index > 500) boundaries.push(nextBoldSectionMatch.index);
+            const nextHeading = afterChunk.match(/<(?:h[1-4])\b[^>]*>/i);
+            const nextTable = afterChunk.match(/<table\b/i);
+            if (nextHeading) boundaries.push(nextHeading.index);
+            if (nextTable) boundaries.push(nextTable.index);
 
+            let footnoteEnd;
             if (boundaries.length > 0) {
                 footnoteEnd = Math.min(...boundaries);
             } else {
                 footnoteEnd = Math.min(afterChunk.length, 8000);
             }
-            // Clamp: at least include 200 chars after table, cap at 8000
             footnoteEnd = Math.max(footnoteEnd, 200);
             footnoteEnd = Math.min(footnoteEnd, 8000);
 
-            rawSectionHtml = html.substring(sectionStart, afterTableStart + footnoteEnd);
+            rawSectionHtml = html.substring(rawPos.start, afterStart + footnoteEnd);
         }
 
         allTableData.push({
