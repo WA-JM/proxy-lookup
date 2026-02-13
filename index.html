@@ -283,6 +283,19 @@
         }
         .filing-link:hover { border-bottom-style: solid; }
 
+        /* Embedded proxy iframe */
+        .proxy-embed {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            margin-top: 16px;
+        }
+        .proxy-embed iframe {
+            width: 100%;
+            height: 600px;
+            border: none;
+        }
+
         /* ââ Calculator ââ */
         .calc-card {
             background: var(--card-bg);
@@ -654,7 +667,7 @@ async function fetchProxyHtml(url) {
 function cleanText(t) { return t.replace(/\s+/g, ' ').trim(); }
 
 function extractNumber(text) {
-    let c = text.replace(/\([^)]*\)/g, '').replace(/[*â â¡Â§]/g, '').trim();
+    let c = text.replace(/\([^)]*\)/g, '').replace(/[*\u2020\u2021\u00a7\u2022]/g, '').trim();
     if (['\u2014', '\u2013', '-', ''].includes(c)) return null;
     const m = c.match(/[\d,]+/);
     if (m) {
@@ -766,17 +779,66 @@ function parseOwnershipFromHtml(html, personName) {
 
         // Find as-of date from preceding text
         let asOfDate = 'Date not found';
-        // Walk backwards in the full doc looking for "as of" near this table
-        // We'll use a simple approach: search the full HTML before the table
         const tableHtml = table.outerHTML;
         const tablePos = html.indexOf(tableHtml.substring(0, 80));
         if (tablePos > 0) {
-            const preceding = html.substring(Math.max(0, tablePos - 4000), tablePos);
-            const plainPreceding = preceding.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-            const dateMatches = [...plainPreceding.matchAll(/as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-            if (dateMatches.length > 0) {
-                asOfDate = dateMatches[dateMatches.length - 1][1].trim();
+            // Search a larger window before the table (up to 10000 chars)
+            const preceding = html.substring(Math.max(0, tablePos - 10000), tablePos);
+            const plainPreceding = preceding.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
+
+            // Try multiple patterns, most specific first
+            // Pattern 1: "as of [Month Day, Year]"
+            const p1 = [...plainPreceding.matchAll(/as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+            // Pattern 2: "as of [Month Day Year]" (no comma)
+            const p2 = [...plainPreceding.matchAll(/as\s+of\s+(\w+\s+\d{1,2}\s+\d{4})/gi)];
+            // Pattern 3: "as of [YYYY-MM-DD]" or similar ISO-ish
+            const p3 = [...plainPreceding.matchAll(/as\s+of\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/gi)];
+            // Pattern 4: "record date" patterns — "record date of [date]" or "record date is [date]" or "record date, [date]"
+            const p4 = [...plainPreceding.matchAll(/record\s+date[^.]*?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+
+            const allFound = [...p1, ...p2, ...p3, ...p4];
+            if (allFound.length > 0) {
+                // Use the last match (closest to the table)
+                asOfDate = allFound[allFound.length - 1][1].trim();
             }
+        }
+
+        // Extract the raw HTML section: table + footnotes that follow
+        let rawSectionHtml = '';
+        const tableOuterHtml = table.outerHTML;
+        const tblPos = html.indexOf(tableOuterHtml.substring(0, 80));
+        if (tblPos > -1) {
+            // Grab a heading/paragraph before the table (up to 3000 chars back)
+            // Look for a heading or "beneficial ownership" paragraph before the table
+            const beforeChunk = html.substring(Math.max(0, tblPos - 3000), tblPos);
+            let sectionStart = tblPos;
+            // Try to find a heading (h1-h4, or bold/centered paragraph with "beneficial ownership")
+            const headingMatch = beforeChunk.match(/.*(<(?:h[1-4]|p)[^>]*>(?:(?!<\/(?:h[1-4]|table))[\s\S])*?beneficial\s+own[\s\S]*?)$/i);
+            if (headingMatch) {
+                sectionStart = tblPos - (beforeChunk.length - beforeChunk.lastIndexOf(headingMatch[1]));
+            }
+
+            // After the table, grab footnotes (typically <p> or <div> with footnote markers)
+            const afterTableStart = tblPos + tableOuterHtml.length;
+            const afterChunk = html.substring(afterTableStart, afterTableStart + 15000);
+            // Find where the footnote section ends: look for next major heading or next table
+            let footnoteEnd = 0;
+            const nextSectionMatch = afterChunk.match(/<(?:h[1-4])\b[^>]*>/i);
+            const nextTableMatch = afterChunk.match(/<table\b/i);
+            if (nextSectionMatch && nextTableMatch) {
+                footnoteEnd = Math.min(nextSectionMatch.index, nextTableMatch.index);
+            } else if (nextSectionMatch) {
+                footnoteEnd = nextSectionMatch.index;
+            } else if (nextTableMatch) {
+                footnoteEnd = nextTableMatch.index;
+            } else {
+                footnoteEnd = Math.min(afterChunk.length, 8000);
+            }
+            // Clamp: at least include 200 chars after table, cap at 8000
+            footnoteEnd = Math.max(footnoteEnd, 200);
+            footnoteEnd = Math.min(footnoteEnd, 8000);
+
+            rawSectionHtml = html.substring(sectionStart, afterTableStart + footnoteEnd);
         }
 
         allTableData.push({
@@ -785,7 +847,8 @@ function parseOwnershipFromHtml(html, personName) {
             matchedRow,
             matchedShares,
             asOfDate,
-            beneficialCol
+            beneficialCol,
+            rawSectionHtml
         });
     }
 
@@ -811,15 +874,15 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl) {
     if (result.found && result.matchedShares !== null) {
         header.className = 'result-header';
         summary.textContent = `${personName} beneficially owns ${result.matchedShares.toLocaleString()} shares`;
-        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· As of ${result.asOfDate} Â· Source: DEF 14A filed ${fileDate}`;
+        meta.textContent = `${company} (${ticker.toUpperCase()}) · As of ${result.asOfDate} · Source: DEF 14A filed ${fileDate}`;
     } else if (result.found) {
         header.className = 'result-header';
         summary.textContent = `${personName} found in ownership table (share count unclear)`;
-        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· Source: DEF 14A filed ${fileDate}`;
+        meta.textContent = `${company} (${ticker.toUpperCase()}) · Source: DEF 14A filed ${fileDate}`;
     } else {
         header.className = 'result-header error';
         summary.textContent = `"${personName}" not found in the beneficial ownership tables`;
-        meta.textContent = `${company} (${ticker.toUpperCase()}) Â· Searched ${result.tables.length} table(s)`;
+        meta.textContent = `${company} (${ticker.toUpperCase()}) · Searched ${result.tables.length} table(s)`;
     }
 
     // Build body
@@ -836,25 +899,94 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl) {
         </div>`;
     }
 
-    // Render the matched table (or first table)
+    // Show the actual proxy document section in a sandboxed iframe
     const tIdx = result.matchedTableIndex ?? 0;
     const tbl = result.tables[tIdx];
-    if (tbl && tbl.rows.length > 0) {
-        html += `<div class="table-section"><h3>Beneficial Ownership Table</h3><div class="table-wrap"><table>`;
-        if (tbl.headers.length > 0) {
-            html += '<thead><tr>' + tbl.headers.map(h => `<th>${escHtml(h)}</th>`).join('') + '</tr></thead>';
-        }
-        html += '<tbody>';
-        for (const row of tbl.rows) {
-            const cls = row.isMatch ? ' class="highlight"' : '';
-            html += `<tr${cls}>` + row.cells.map(c => `<td>${escHtml(c)}</td>`).join('') + '</tr>';
-        }
-        html += '</tbody></table></div></div>';
+    if (tbl && tbl.rawSectionHtml) {
+        html += `<div class="table-section"><h3>From the Proxy Filing</h3>`;
+        html += `<div class="proxy-embed" id="proxyEmbedContainer"></div>`;
+        html += `</div>`;
     }
 
     html += `<a class="filing-link" href="${docUrl}" target="_blank" rel="noopener">View full SEC filing on EDGAR &rarr;</a>`;
 
     body.innerHTML = html;
+
+    // Inject the raw proxy HTML into a sandboxed iframe
+    if (tbl && tbl.rawSectionHtml) {
+        const container = document.getElementById('proxyEmbedContainer');
+        const iframe = document.createElement('iframe');
+        iframe.sandbox = 'allow-same-origin';
+        iframe.style.width = '100%';
+        iframe.style.border = 'none';
+        iframe.style.minHeight = '400px';
+        container.appendChild(iframe);
+
+        // Build the iframe content with highlight styles
+        const highlightCss = `
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    margin: 16px;
+                    font-size: 14px;
+                    color: #2c3e50;
+                    line-height: 1.5;
+                }
+                table {
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 12px 0;
+                }
+                td, th {
+                    padding: 6px 10px;
+                    border-bottom: 1px solid #e1e5eb;
+                    vertical-align: top;
+                }
+                th {
+                    background: #f0f2f5;
+                    font-weight: 600;
+                    text-align: left;
+                }
+                tr:hover td { background: #fafbfc; }
+                /* Highlight the matched person's row */
+                tr.wa-highlight td {
+                    background: #fff8e1 !important;
+                    font-weight: 600;
+                }
+                p { margin: 8px 0; }
+                sup { font-size: 0.75em; }
+            </style>
+        `;
+
+        // Highlight the matched person's name in the raw HTML
+        let sectionHtml = tbl.rawSectionHtml;
+        if (tbl.matchedRow) {
+            // Find the person's name in table rows and add a highlight class
+            const nameToHighlight = tbl.matchedRow.name;
+            // Use DOMParser to manipulate the section HTML and add highlight to matching rows
+            const tempDoc = new DOMParser().parseFromString(sectionHtml, 'text/html');
+            const tempRows = tempDoc.querySelectorAll('tr');
+            for (const row of tempRows) {
+                const firstCell = row.querySelector('td');
+                if (firstCell && nameMatches(firstCell.textContent, personName)) {
+                    row.classList.add('wa-highlight');
+                }
+            }
+            sectionHtml = tempDoc.body.innerHTML;
+        }
+
+        const iframeContent = `<!DOCTYPE html><html><head><meta charset="UTF-8">${highlightCss}</head><body>${sectionHtml}</body></html>`;
+
+        iframe.srcdoc = iframeContent;
+
+        // Auto-resize iframe to fit content
+        iframe.onload = () => {
+            try {
+                const h = iframe.contentDocument.body.scrollHeight;
+                iframe.style.height = Math.min(Math.max(h + 40, 300), 1200) + 'px';
+            } catch(e) { iframe.style.height = '600px'; }
+        };
+    }
 }
 
 function escHtml(s) {
@@ -903,13 +1035,13 @@ function recalculate() {
         badgeEl.innerHTML = '';
     } else if (pct < 10) {
         pctEl.style.color = '#2e7d32';
-        badgeEl.innerHTML = '<span class="severity-badge severity-low">Low â under 10%</span>';
+        badgeEl.innerHTML = '<span class="severity-badge severity-low">Low — Under 10%</span>';
     } else if (pct <= 30) {
         pctEl.style.color = '#e65100';
-        badgeEl.innerHTML = '<span class="severity-badge severity-medium">Medium â 10% to 30%</span>';
+        badgeEl.innerHTML = '<span class="severity-badge severity-medium">Medium — 10% to 30%</span>';
     } else {
         pctEl.style.color = '#bf360c';
-        badgeEl.innerHTML = '<span class="severity-badge severity-high">Significant â over 30%</span>';
+        badgeEl.innerHTML = '<span class="severity-badge severity-high">Significant — Over 30%</span>';
         resultEl.classList.add('severity-high-glow');
     }
 
