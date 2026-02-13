@@ -725,6 +725,32 @@ function parseOwnershipFromHtml(html, personName) {
     };
 }
 
+// — Fix relative URLs in proxy HTML so images/assets load correctly —
+function makeUrlsAbsolute(html, docUrl) {
+    // Derive the base directory from the document URL
+    const baseUrl = docUrl.substring(0, docUrl.lastIndexOf('/') + 1);
+    // Fix img src attributes (relative → absolute)
+    html = html.replace(/(<img\b[^>]*?\bsrc\s*=\s*["'])(?!https?:\/\/|data:|#)([^"']+)(["'])/gi,
+        (match, prefix, path, suffix) => {
+            if (path.startsWith('/')) {
+                // Absolute path — prepend origin
+                const origin = new URL(docUrl).origin;
+                return prefix + origin + path + suffix;
+            }
+            return prefix + baseUrl + path + suffix;
+        });
+    // Also fix background image url() references
+    html = html.replace(/(url\(\s*["']?)(?!https?:\/\/|data:|#)([^"')]+)(["']?\s*\))/gi,
+        (match, prefix, path, suffix) => {
+            if (path.startsWith('/')) {
+                const origin = new URL(docUrl).origin;
+                return prefix + origin + path + suffix;
+            }
+            return prefix + baseUrl + path + suffix;
+        });
+    return html;
+}
+
 // — Render results —
 function renderResults(result, company, ticker, personName, fileDate, docUrl, fullProxyHtml) {
     const banner = $('resultBanner');
@@ -815,7 +841,7 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
             <\/script>
         `;
 
-        let modifiedHtml = fullProxyHtml;
+        let modifiedHtml = makeUrlsAbsolute(fullProxyHtml, docUrl);
         const headClose = modifiedHtml.toLowerCase().indexOf('</head>');
         if (headClose > -1) {
             modifiedHtml = modifiedHtml.substring(0, headClose) + injectedCode + modifiedHtml.substring(headClose);
