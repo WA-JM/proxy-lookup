@@ -554,8 +554,8 @@ function nameMatches(cellText, personName) {
         const suffixes = ['jr', 'jr.', 'sr', 'sr.', 'ii', 'iii', 'iv'];
         if (suffixes.includes(last) && parts.length >= 3) last = parts[parts.length - 2].replace(/,/, '');
         if (suffixes.includes(first) && parts.length >= 3) first = parts[1];
+        // Both first and last name must appear in the cell
         if (cell.includes(last) && cell.includes(first)) return true;
-        if (last.length >= 4 && cell.includes(last)) return true;
     }
     return false;
 }
@@ -715,7 +715,7 @@ function parseOwnershipFromHtml(html, personName) {
         });
     }
 
-    const matchedTable = allTableData.find(t => t.matchedRow !== null);
+    const matchedTable = allTableData.find(t => t.matchedRow !== null) || null;
     return {
         found: matchedTable !== null,
         matchedShares: matchedTable?.matchedShares ?? null,
