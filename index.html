@@ -781,26 +781,37 @@ function parseOwnershipFromHtml(html, personName) {
         let asOfDate = 'Date not found';
         const tableHtml = table.outerHTML;
         const tablePos = html.indexOf(tableHtml.substring(0, 80));
-        if (tablePos > 0) {
-            // Search a larger window before the table (up to 10000 chars)
-            const preceding = html.substring(Math.max(0, tablePos - 10000), tablePos);
-            const plainPreceding = preceding.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
 
-            // Try multiple patterns, most specific first
+        // Helper: search text for as-of date patterns
+        function findAsOfDate(text) {
+            const plain = text.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
             // Pattern 1: "as of [Month Day, Year]"
-            const p1 = [...plainPreceding.matchAll(/as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+            const p1 = [...plain.matchAll(/as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
             // Pattern 2: "as of [Month Day Year]" (no comma)
-            const p2 = [...plainPreceding.matchAll(/as\s+of\s+(\w+\s+\d{1,2}\s+\d{4})/gi)];
-            // Pattern 3: "as of [YYYY-MM-DD]" or similar ISO-ish
-            const p3 = [...plainPreceding.matchAll(/as\s+of\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/gi)];
-            // Pattern 4: "record date" patterns — "record date of [date]" or "record date is [date]" or "record date, [date]"
-            const p4 = [...plainPreceding.matchAll(/record\s+date[^.]*?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-
-            const allFound = [...p1, ...p2, ...p3, ...p4];
+            const p2 = [...plain.matchAll(/as\s+of\s+(\w+\s+\d{1,2}\s+\d{4})/gi)];
+            // Pattern 3: "as of [MM/DD/YYYY]"
+            const p3 = [...plain.matchAll(/as\s+of\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/gi)];
+            // Pattern 4: "record date" patterns
+            const p4 = [...plain.matchAll(/record\s+date[^.]*?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+            // Pattern 5: "ownership of common stock as of" or "beneficial ownership...as of"
+            const p5 = [...plain.matchAll(/beneficial\s+own[^.]*?as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+            const allFound = [...p1, ...p2, ...p3, ...p4, ...p5];
             if (allFound.length > 0) {
-                // Use the last match (closest to the table)
-                asOfDate = allFound[allFound.length - 1][1].trim();
+                return allFound[allFound.length - 1][1].trim();
             }
+            return null;
+        }
+
+        // First: search preceding text (up to 10000 chars before the table)
+        if (tablePos > 0) {
+            const preceding = html.substring(Math.max(0, tablePos - 10000), tablePos);
+            asOfDate = findAsOfDate(preceding) || asOfDate;
+        }
+        // Fallback: search the whole document for the "beneficial ownership" section "as of" date
+        if (asOfDate === 'Date not found') {
+            const fullPlain = html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
+            const boMatches = [...fullPlain.matchAll(/beneficial\s+own[^.]*?as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+            if (boMatches.length > 0) asOfDate = boMatches[boMatches.length - 1][1].trim();
         }
 
         // Extract the raw HTML section: table + footnotes that follow
@@ -808,29 +819,30 @@ function parseOwnershipFromHtml(html, personName) {
         const tableOuterHtml = table.outerHTML;
         const tblPos = html.indexOf(tableOuterHtml.substring(0, 80));
         if (tblPos > -1) {
-            // Grab a heading/paragraph before the table (up to 3000 chars back)
-            // Look for a heading or "beneficial ownership" paragraph before the table
-            const beforeChunk = html.substring(Math.max(0, tblPos - 3000), tblPos);
+            // Start right at the table — don't try to grab headings before it
+            // (the heading search was grabbing too much irrelevant content)
             let sectionStart = tblPos;
-            // Try to find a heading (h1-h4, or bold/centered paragraph with "beneficial ownership")
-            const headingMatch = beforeChunk.match(/.*(<(?:h[1-4]|p)[^>]*>(?:(?!<\/(?:h[1-4]|table))[\s\S])*?beneficial\s+own[\s\S]*?)$/i);
-            if (headingMatch) {
-                sectionStart = tblPos - (beforeChunk.length - beforeChunk.lastIndexOf(headingMatch[1]));
-            }
 
-            // After the table, grab footnotes (typically <p> or <div> with footnote markers)
+            // After the table, grab footnotes (typically <p> or <div> with footnote numbers)
             const afterTableStart = tblPos + tableOuterHtml.length;
             const afterChunk = html.substring(afterTableStart, afterTableStart + 15000);
-            // Find where the footnote section ends: look for next major heading or next table
+
+            // Find where footnotes end: look for next major heading or next table
             let footnoteEnd = 0;
+            // Match headings (h1-h4) or bold section titles
             const nextSectionMatch = afterChunk.match(/<(?:h[1-4])\b[^>]*>/i);
             const nextTableMatch = afterChunk.match(/<table\b/i);
-            if (nextSectionMatch && nextTableMatch) {
-                footnoteEnd = Math.min(nextSectionMatch.index, nextTableMatch.index);
-            } else if (nextSectionMatch) {
-                footnoteEnd = nextSectionMatch.index;
-            } else if (nextTableMatch) {
-                footnoteEnd = nextTableMatch.index;
+
+            // Also look for a clear section break (like centered bold text for a new section)
+            const nextBoldSectionMatch = afterChunk.match(/<p[^>]*>\s*<b[^>]*>[^<]{5,80}<\/b>\s*<\/p>/i);
+
+            const boundaries = [];
+            if (nextSectionMatch) boundaries.push(nextSectionMatch.index);
+            if (nextTableMatch) boundaries.push(nextTableMatch.index);
+            if (nextBoldSectionMatch && nextBoldSectionMatch.index > 500) boundaries.push(nextBoldSectionMatch.index);
+
+            if (boundaries.length > 0) {
+                footnoteEnd = Math.min(...boundaries);
             } else {
                 footnoteEnd = Math.min(afterChunk.length, 8000);
             }
