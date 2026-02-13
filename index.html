@@ -691,7 +691,7 @@ function nameMatches(cellText, personName) {
 }
 
 function findAsOfDate(text) {
-    const plain = text.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
+    const plain = text.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&#160;/gi, ' ').replace(/&#xa0;/gi, ' ').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
 
     // Priority 1: "beneficial own...as of [date]" — most specific to ownership tables
     const p5 = [...plain.matchAll(/beneficial\s+own[^.]{0,120}?as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
