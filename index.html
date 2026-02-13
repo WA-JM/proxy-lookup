@@ -510,7 +510,7 @@
 
     <!-- Sale Calculator -->
     <div class="calc-card" id="calcCard">
-        <div class="calc-header">Sale &amp; Adjustment Calculator</div>
+        <div class="calc-header">Proxy Stock Ownership Calculator</div>
         <div class="calc-body">
             <div class="calc-section">
                 <div class="calc-section-title">Shares Sold</div>
@@ -562,10 +562,6 @@
     </div>
 </div>
 
-<footer>
-    W Advisors &mdash; Data sourced from <a href="https://www.sec.gov/edgar" target="_blank" rel="noopener">SEC EDGAR</a>.
-    Not investment advice.
-</footer>
 
 <script>
 // âââââââââââââââââââââââââââââââââââââââââââ
@@ -696,13 +692,31 @@ function nameMatches(cellText, personName) {
 
 function findAsOfDate(text) {
     const plain = text.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ');
-    const p1 = [...plain.matchAll(/as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-    const p2 = [...plain.matchAll(/as\s+of\s+(\w+\s+\d{1,2}\s+\d{4})/gi)];
-    const p3 = [...plain.matchAll(/as\s+of\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/gi)];
+
+    // Priority 1: "beneficial own...as of [date]" — most specific to ownership tables
+    const p5 = [...plain.matchAll(/beneficial\s+own[^.]{0,120}?as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+    if (p5.length > 0) return p5[p5.length - 1][1].trim();
+
+    // Priority 2: "information...as of [date]" — often in ownership section intros
+    const p6 = [...plain.matchAll(/information[^.]{0,80}?as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+    if (p6.length > 0) return p6[p6.length - 1][1].trim();
+
+    // Priority 3: "record date" references
     const p4 = [...plain.matchAll(/record\s+date[^.]*?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-    const p5 = [...plain.matchAll(/beneficial\s+own[^.]*?as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
-    const allFound = [...p1, ...p2, ...p3, ...p4, ...p5];
-    if (allFound.length > 0) return allFound[allFound.length - 1][1].trim();
+    if (p4.length > 0) return p4[p4.length - 1][1].trim();
+
+    // Priority 4: Generic "as of [date]" — take the LAST match (closest to the table)
+    const p1 = [...plain.matchAll(/as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+    if (p1.length > 0) return p1[p1.length - 1][1].trim();
+
+    // Priority 5: "as of" with no comma in date
+    const p2 = [...plain.matchAll(/as\s+of\s+(\w+\s+\d{1,2}\s+\d{4})/gi)];
+    if (p2.length > 0) return p2[p2.length - 1][1].trim();
+
+    // Priority 6: Numeric date format
+    const p3 = [...plain.matchAll(/as\s+of\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/gi)];
+    if (p3.length > 0) return p3[p3.length - 1][1].trim();
+
     return null;
 }
 
@@ -829,14 +843,26 @@ function parseOwnershipFromHtml(html, personName) {
         // Use raw HTML positions for section extraction and date finding
         const rawPos = rawTablePositions[tblIdx] || null;
 
-        // Find as-of date
+        // Find as-of date — search strategically for the most relevant date
         let asOfDate = 'Date not found';
         if (rawPos) {
-            const preceding = html.substring(Math.max(0, rawPos.start - 10000), rawPos.start);
-            asOfDate = findAsOfDate(preceding) || asOfDate;
+            // First, look inside the table itself (headers often say "as of [date]")
+            asOfDate = findAsOfDate(rawPos.html) || asOfDate;
+
+            // If not in the table, check the 3000 chars immediately before (closest context)
+            if (asOfDate === 'Date not found') {
+                const nearPreceding = html.substring(Math.max(0, rawPos.start - 3000), rawPos.start);
+                asOfDate = findAsOfDate(nearPreceding) || asOfDate;
+            }
+
+            // Wider preceding search (up to 10k before)
+            if (asOfDate === 'Date not found') {
+                const preceding = html.substring(Math.max(0, rawPos.start - 10000), rawPos.start);
+                asOfDate = findAsOfDate(preceding) || asOfDate;
+            }
         }
         if (asOfDate === 'Date not found') {
-            // Fallback: search the whole document
+            // Last resort: search the whole document
             asOfDate = findAsOfDate(html) || asOfDate;
         }
 
