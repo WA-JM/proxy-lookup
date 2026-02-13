@@ -451,16 +451,7 @@
 <header>
     <div class="header-inner">
         <div class="brand">
-            <div class="brand-icon"><svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg">
-              <polygon points="15,40 50,25 85,40 85,45 15,45" fill="#5b8ca8"/>
-              <rect x="25" y="0" width="12" height="30" rx="1" fill="#3a6e8c"/>
-              <rect x="63" y="0" width="12" height="30" rx="1" fill="#3a6e8c"/>
-              <polygon points="10,45 50,32 90,45 90,55 10,55" fill="#6a9db5"/>
-              <polygon points="8,55 50,43 92,55 92,65 8,65" fill="#7fb3c4"/>
-              <polygon points="5,65 50,53 95,65 95,78 5,78" fill="#5a8fa3"/>
-              <polygon points="3,78 50,67 97,78 97,90 3,90" fill="#89bcc9"/>
-              <polygon points="0,90 50,80 100,90 100,105 0,105" fill="#a3cdd7"/>
-            </svg></div>
+            <div class="brand-icon"><img src="Watchtower Logo.png" alt="Watchtower Advisors"></div>
             <h1>SEC Stock Ownership Lookup</h1>
         </div>
         <div class="brand-sub">Look up beneficial ownership from the latest DEF 14A proxy statement</div>
@@ -568,10 +559,8 @@
 // SEC Stock Ownership Lookup â Client-Side
 // âââââââââââââââââââââââââââââââââââââââââââ
 
-const HEADERS = {
-    'User-Agent': 'stock-lookup-web/1.0 (jacob@wadvisorslp.com)',
-    'Accept': 'application/json',
-};
+// Cloudflare Worker proxy — routes SEC requests to avoid CORS/503 blocks
+const PROXY_BASE = 'https://sec-proxy.jacob-ad2.workers.dev';
 
 // SEC EDGAR enforces 10 req/sec; small helper to pace requests
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -607,9 +596,8 @@ function showResult(show) {
 
 // ââ Fetch with SEC-friendly headers ââ
 async function secFetch(url, opts = {}) {
-    // Note: browsers strip custom User-Agent, but we include it anyway
-    // for non-browser contexts. SEC allows public CORS access to these endpoints.
-    const resp = await fetch(url, { ...opts });
+    const proxyUrl = `${PROXY_BASE}/?url=${encodeURIComponent(url)}`;
+    const resp = await fetch(proxyUrl, { ...opts });
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
     return resp;
 }
