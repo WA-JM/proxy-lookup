@@ -783,10 +783,11 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
             });
         });
     } else if (result.found && result.matchedShares !== null) {
+        const displayName = (result.matchedNames && result.matchedNames.length === 1) ? result.matchedNames[0] : personName;
         banner.className = 'result-banner visible success';
         banner.style.background = '';
         summaryEl.style.color = '';
-        summaryEl.textContent = `${personName} owns ${result.matchedShares.toLocaleString()} shares`;
+        summaryEl.textContent = `${displayName} owns ${result.matchedShares.toLocaleString()} shares`;
         metaEl.textContent = `${company} (${ticker.toUpperCase()}) · As of ${result.asOfDate} · DEF 14A filed ${fileDate}`;
 
         detailRow.style.display = 'flex';
@@ -797,10 +798,11 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
             <div class="detail-item"><label>As Of</label><div class="value">${result.asOfDate}</div></div>
         `;
     } else if (result.found) {
+        const displayName = (result.matchedNames && result.matchedNames.length === 1) ? result.matchedNames[0] : personName;
         banner.className = 'result-banner visible success';
         banner.style.background = '';
         summaryEl.style.color = '';
-        summaryEl.textContent = `${personName} found (share count unclear)`;
+        summaryEl.textContent = `${displayName} found (share count unclear)`;
         metaEl.textContent = `${company} (${ticker.toUpperCase()}) · DEF 14A filed ${fileDate}`;
         detailRow.style.display = 'none';
     } else {
