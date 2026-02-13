@@ -292,7 +292,7 @@
         }
         .proxy-embed iframe {
             width: 100%;
-            height: 600px;
+            height: 700px;
             border: none;
         }
 
@@ -916,7 +916,7 @@ function parseOwnershipFromHtml(html, personName) {
 }
 
 // ââ Render results ââ
-function renderResults(result, company, ticker, personName, fileDate, docUrl) {
+function renderResults(result, company, ticker, personName, fileDate, docUrl, fullProxyHtml) {
     showResult(true);
     const header = $('resultHeader');
     const summary = $('resultSummary');
@@ -951,11 +951,9 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl) {
         </div>`;
     }
 
-    // Show the actual proxy document section in a sandboxed iframe
-    const tIdx = result.matchedTableIndex ?? 0;
-    const tbl = result.tables[tIdx];
-    if (tbl && tbl.rawSectionHtml) {
-        html += `<div class="table-section"><h3>From the Proxy Filing</h3>`;
+    // Embed the full proxy document in a scrollable iframe
+    if (fullProxyHtml) {
+        html += `<div class="table-section"><h3>Proxy Filing</h3>`;
         html += `<div class="proxy-embed" id="proxyEmbedContainer"></div>`;
         html += `</div>`;
     }
@@ -964,80 +962,68 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl) {
 
     body.innerHTML = html;
 
-    // Inject the raw proxy HTML into a sandboxed iframe
-    if (tbl && tbl.rawSectionHtml) {
+    // Inject the full proxy document into a scrollable iframe, auto-scrolled to the ownership table
+    if (fullProxyHtml) {
         const container = document.getElementById('proxyEmbedContainer');
         const iframe = document.createElement('iframe');
-        iframe.sandbox = 'allow-same-origin';
+        iframe.sandbox = 'allow-same-origin allow-scripts';
         iframe.style.width = '100%';
         iframe.style.border = 'none';
-        iframe.style.minHeight = '400px';
+        iframe.style.height = '700px';
         container.appendChild(iframe);
 
-        // Build the iframe content with highlight styles
-        const highlightCss = `
+        // Build script to highlight the matched person and scroll to the ownership table
+        const personNameEsc = personName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const injectedCode = `
             <style>
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    margin: 16px;
-                    font-size: 14px;
-                    color: #2c3e50;
-                    line-height: 1.5;
-                }
-                table {
-                    border-collapse: collapse;
-                    width: 100%;
-                    margin: 12px 0;
-                }
-                td, th {
-                    padding: 6px 10px;
-                    border-bottom: 1px solid #e1e5eb;
-                    vertical-align: top;
-                }
-                th {
-                    background: #f0f2f5;
-                    font-weight: 600;
-                    text-align: left;
-                }
-                tr:hover td { background: #fafbfc; }
-                /* Highlight the matched person's row */
                 tr.wa-highlight td {
                     background: #fff8e1 !important;
                     font-weight: 600;
                 }
-                p { margin: 8px 0; }
-                sup { font-size: 0.75em; }
             </style>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    var personName = '${personNameEsc}'.toLowerCase();
+                    var parts = personName.split(/\\s+/);
+                    var lastName = parts[parts.length - 1];
+                    var firstName = parts[0];
+                    var tables = document.querySelectorAll('table');
+                    var scrollTarget = null;
+                    for (var t = 0; t < tables.length; t++) {
+                        var txt = tables[t].textContent.toLowerCase();
+                        if ((txt.indexOf('beneficial own') > -1 || txt.indexOf('amount and nature') > -1) && txt.indexOf('name') > -1) {
+                            var rows = tables[t].querySelectorAll('tr');
+                            for (var r = 0; r < rows.length; r++) {
+                                var cell = rows[r].querySelector('td');
+                                if (cell) {
+                                    var ct = cell.textContent.toLowerCase();
+                                    if (ct.indexOf(personName) > -1 || (ct.indexOf(lastName) > -1 && ct.indexOf(firstName) > -1)) {
+                                        rows[r].classList.add('wa-highlight');
+                                        if (!scrollTarget) scrollTarget = rows[r];
+                                    }
+                                }
+                            }
+                            if (!scrollTarget) scrollTarget = tables[t];
+                            break;
+                        }
+                    }
+                    if (scrollTarget) {
+                        setTimeout(function() { scrollTarget.scrollIntoView({ block: 'center' }); }, 100);
+                    }
+                });
+            <\/script>
         `;
 
-        // Highlight the matched person's name in the raw HTML
-        let sectionHtml = tbl.rawSectionHtml;
-        if (tbl.matchedRow) {
-            // Find the person's name in table rows and add a highlight class
-            const nameToHighlight = tbl.matchedRow.name;
-            // Use DOMParser to manipulate the section HTML and add highlight to matching rows
-            const tempDoc = new DOMParser().parseFromString(sectionHtml, 'text/html');
-            const tempRows = tempDoc.querySelectorAll('tr');
-            for (const row of tempRows) {
-                const firstCell = row.querySelector('td');
-                if (firstCell && nameMatches(firstCell.textContent, personName)) {
-                    row.classList.add('wa-highlight');
-                }
-            }
-            sectionHtml = tempDoc.body.innerHTML;
+        // Insert into the proxy HTML's <head>
+        let modifiedHtml = fullProxyHtml;
+        const headClose = modifiedHtml.toLowerCase().indexOf('</head>');
+        if (headClose > -1) {
+            modifiedHtml = modifiedHtml.substring(0, headClose) + injectedCode + modifiedHtml.substring(headClose);
+        } else {
+            modifiedHtml = injectedCode + modifiedHtml;
         }
 
-        const iframeContent = `<!DOCTYPE html><html><head><meta charset="UTF-8">${highlightCss}</head><body>${sectionHtml}</body></html>`;
-
-        iframe.srcdoc = iframeContent;
-
-        // Auto-resize iframe to fit content
-        iframe.onload = () => {
-            try {
-                const h = iframe.contentDocument.body.scrollHeight;
-                iframe.style.height = Math.min(Math.max(h + 40, 300), 1200) + 'px';
-            } catch(e) { iframe.style.height = '600px'; }
-        };
+        iframe.srcdoc = modifiedHtml;
     }
 }
 
@@ -1084,18 +1070,15 @@ function recalculate() {
 
     if (sold === 0) {
         pctEl.style.color = 'var(--text-muted)';
-        badgeEl.innerHTML = '';
     } else if (pct < 10) {
         pctEl.style.color = '#2e7d32';
-        badgeEl.innerHTML = '<span class="severity-badge severity-low">Low — Under 10%</span>';
     } else if (pct <= 30) {
         pctEl.style.color = '#e65100';
-        badgeEl.innerHTML = '<span class="severity-badge severity-medium">Medium — 10% to 30%</span>';
     } else {
         pctEl.style.color = '#bf360c';
-        badgeEl.innerHTML = '<span class="severity-badge severity-high">Significant — Over 30%</span>';
         resultEl.classList.add('severity-high-glow');
     }
+    badgeEl.innerHTML = '';
 
     // Breakdown
     const bk = $('calcBreakdown');
@@ -1174,7 +1157,7 @@ $('searchForm').addEventListener('submit', async (e) => {
         steps[3].label = `Found ${result.tables.length} ownership table(s)`;
         setSteps(steps);
 
-        renderResults(result, company, ticker, personName, fileDate, docUrl);
+        renderResults(result, company, ticker, personName, fileDate, docUrl, html);
 
         // Show calculator if we found shares
         if (result.found && result.matchedShares !== null) {
