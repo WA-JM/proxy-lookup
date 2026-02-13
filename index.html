@@ -841,28 +841,56 @@ function parseOwnershipFromHtml(html, personName) {
         }
 
         // Extract raw HTML section: table + footnotes after it
+        // SEC filings often put footnotes in a separate <table> right after
         let rawSectionHtml = '';
         if (rawPos) {
-            const afterStart = rawPos.end;
-            const afterChunk = html.substring(afterStart, afterStart + 15000);
+            let scanPos = rawPos.end;
+            const maxScan = rawPos.end + 30000;
 
-            // Find where footnotes end
+            // Skip past footnote tables (tables containing "(1)", "(2)" etc.)
+            while (scanPos < maxScan) {
+                const chunk = html.substring(scanPos, scanPos + 20000);
+                const nextTableMatch = chunk.match(/<table\b/i);
+                if (!nextTableMatch) break;
+
+                // Check if this next table looks like footnotes
+                const tStart = scanPos + nextTableMatch.index;
+                // Find its closing tag
+                let depth = 1, p = tStart + 6;
+                while (depth > 0 && p < html.length) {
+                    const nO = html.indexOf('<table', p);
+                    const nC = html.indexOf('</table', p);
+                    if (nC === -1) break;
+                    if (nO !== -1 && nO < nC) { depth++; p = nO + 6; }
+                    else { depth--; p = nC + 8; }
+                }
+                const tEnd = p;
+                const tblText = html.substring(tStart, tEnd).replace(/<[^>]+>/g, ' ');
+
+                // Is it a footnote table? Check for numbered footnotes like (1), (2)
+                const hasFootnoteNums = /\(\d+\)\s/.test(tblText);
+                // Also check it doesn't look like a new data table
+                const looksLikeDataTable = /beneficial\s+own/i.test(tblText) && /\d{1,3}(,\d{3}){2,}/.test(tblText);
+
+                if (hasFootnoteNums && !looksLikeDataTable) {
+                    scanPos = tEnd; // Include this footnote table, keep scanning
+                } else {
+                    break; // Not a footnote table, stop
+                }
+            }
+
+            // Also grab any non-table content (paragraphs) after the last footnote table
+            const remainingChunk = html.substring(scanPos, scanPos + 5000);
+            const nextHeading = remainingChunk.match(/<(?:h[1-4])\b[^>]*>/i);
+            const nextTable = remainingChunk.match(/<table\b/i);
             const boundaries = [];
-            const nextHeading = afterChunk.match(/<(?:h[1-4])\b[^>]*>/i);
-            const nextTable = afterChunk.match(/<table\b/i);
             if (nextHeading) boundaries.push(nextHeading.index);
             if (nextTable) boundaries.push(nextTable.index);
 
-            let footnoteEnd;
-            if (boundaries.length > 0) {
-                footnoteEnd = Math.min(...boundaries);
-            } else {
-                footnoteEnd = Math.min(afterChunk.length, 8000);
-            }
-            footnoteEnd = Math.max(footnoteEnd, 200);
-            footnoteEnd = Math.min(footnoteEnd, 8000);
+            let extraEnd = boundaries.length > 0 ? Math.min(...boundaries) : Math.min(remainingChunk.length, 2000);
+            extraEnd = Math.min(extraEnd, 2000);
 
-            rawSectionHtml = html.substring(rawPos.start, afterStart + footnoteEnd);
+            rawSectionHtml = html.substring(rawPos.start, scanPos + extraEnd);
         }
 
         allTableData.push({
