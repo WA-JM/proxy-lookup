@@ -896,14 +896,12 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
         } else {
             modifiedHtml = injectedCode + modifiedHtml;
         }
-        iframe.srcdoc = modifiedHtml;
-
         // Highlight matching row and scroll to it from the parent
-        // (more reliable than injected scripts which have timing issues in srcdoc)
-        iframe.addEventListener('load', function() {
+        // Attach listener BEFORE setting srcdoc to avoid race condition
+        iframe.addEventListener('load', function onIframeLoad() {
             try {
                 const doc = iframe.contentDocument;
-                if (!doc) return;
+                if (!doc || !doc.body || doc.body.children.length === 0) return;
                 const pn = personName.toLowerCase();
                 const pParts = pn.split(/\s+/);
                 const pLast = pParts[pParts.length - 1];
@@ -934,6 +932,7 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
                 }
             } catch (e) { /* cross-origin error, ignore */ }
         });
+        iframe.srcdoc = modifiedHtml;
     }
 }
 
