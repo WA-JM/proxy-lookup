@@ -546,16 +546,21 @@ function extractNumber(text) {
 function nameMatches(cellText, personName) {
     const cell = cleanText(cellText).toLowerCase();
     const name = personName.toLowerCase().trim();
-    if (cell.includes(name)) return true;
+    const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Full name match with word boundaries
+    if (new RegExp('\\b' + escRe(name) + '\\b').test(cell)) return true;
+
     const parts = name.split(/\s+/);
     if (parts.length >= 2) {
-        let last = parts[parts.length - 1].replace(/,/, '');
+        let last = parts[parts.length - 1].replace(/,/g, '');
         let first = parts[0];
         const suffixes = ['jr', 'jr.', 'sr', 'sr.', 'ii', 'iii', 'iv'];
-        if (suffixes.includes(last) && parts.length >= 3) last = parts[parts.length - 2].replace(/,/, '');
+        if (suffixes.includes(last) && parts.length >= 3) last = parts[parts.length - 2].replace(/,/g, '');
         if (suffixes.includes(first) && parts.length >= 3) first = parts[1];
-        // Both first and last name must appear in the cell
-        if (cell.includes(last) && cell.includes(first)) return true;
+        // Both first and last name must appear as whole words
+        if (new RegExp('\\b' + escRe(last) + '\\b').test(cell) &&
+            new RegExp('\\b' + escRe(first) + '\\b').test(cell)) return true;
     }
     return false;
 }
@@ -766,12 +771,23 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
     if (result.disambiguate) {
         banner.className = 'result-banner visible';
         banner.style.background = '#fff8e1';
-        summaryEl.innerHTML = `Multiple matches for "<strong>${personName}</strong>". Did you mean:`;
+        summaryEl.textContent = '';
+        summaryEl.appendChild(document.createTextNode('Multiple matches for \u201c'));
+        const strong = document.createElement('strong');
+        strong.textContent = personName;
+        summaryEl.appendChild(strong);
+        summaryEl.appendChild(document.createTextNode('\u201d. Did you mean:'));
         summaryEl.style.color = 'var(--text)';
-        const nameLinks = result.matchedNames.map(n =>
-            `<a href="#" class="disambig-link" style="color:var(--navy);font-weight:600;text-decoration:underline;cursor:pointer;margin-right:4px;">${n}</a>`
-        ).join(' or ');
-        metaEl.innerHTML = nameLinks;
+        metaEl.textContent = '';
+        result.matchedNames.forEach((n, i) => {
+            if (i > 0) metaEl.appendChild(document.createTextNode(' or '));
+            const a = document.createElement('a');
+            a.href = '#';
+            a.className = 'disambig-link';
+            a.style.cssText = 'color:var(--navy);font-weight:600;text-decoration:underline;cursor:pointer;margin-right:4px;';
+            a.textContent = n;
+            metaEl.appendChild(a);
+        });
         detailRow.style.display = 'none';
 
         // Click handler for disambiguation links
@@ -791,12 +807,23 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
         metaEl.textContent = `${company} (${ticker.toUpperCase()}) · As of ${result.asOfDate} · DEF 14A filed ${fileDate}`;
 
         detailRow.style.display = 'flex';
-        detailRow.innerHTML = `
-            <div class="detail-item"><label>Company</label><div class="value">${company}</div></div>
-            <div class="detail-item"><label>Ticker</label><div class="value">${ticker.toUpperCase()}</div></div>
-            <div class="detail-item"><label>Shares</label><div class="value shares">${result.matchedShares.toLocaleString()}</div></div>
-            <div class="detail-item"><label>As Of</label><div class="value">${result.asOfDate}</div></div>
-        `;
+        detailRow.textContent = '';
+        function makeDetailItem(labelText, valueText, extraClass) {
+            const item = document.createElement('div');
+            item.className = 'detail-item';
+            const lbl = document.createElement('label');
+            lbl.textContent = labelText;
+            item.appendChild(lbl);
+            const val = document.createElement('div');
+            val.className = extraClass ? 'value ' + extraClass : 'value';
+            val.textContent = valueText;
+            item.appendChild(val);
+            return item;
+        }
+        detailRow.appendChild(makeDetailItem('Company', company));
+        detailRow.appendChild(makeDetailItem('Ticker', ticker.toUpperCase()));
+        detailRow.appendChild(makeDetailItem('Shares', result.matchedShares.toLocaleString(), 'shares'));
+        detailRow.appendChild(makeDetailItem('As Of', result.asOfDate));
     } else if (result.found) {
         const displayName = (result.matchedNames && result.matchedNames.length === 1) ? result.matchedNames[0] : personName;
         banner.className = 'result-banner visible success';
@@ -832,7 +859,6 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
         iframe.sandbox = 'allow-same-origin allow-scripts';
         rightPanel.appendChild(iframe);
 
-        const personNameEsc = personName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const injectedCode = `
             <style>
                 tr.wa-highlight td {
@@ -841,36 +867,6 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
                 }
             </style>
             <script>
-                document.addEventListener('DOMContentLoaded', function() {
-                    var personName = '${personNameEsc}'.toLowerCase();
-                    var parts = personName.split(/\\s+/);
-                    var lastName = parts[parts.length - 1];
-                    var firstName = parts[0];
-                    var tables = document.querySelectorAll('table');
-                    var scrollTarget = null;
-                    for (var t = 0; t < tables.length; t++) {
-                        var txt = tables[t].textContent.toLowerCase();
-                        if ((txt.indexOf('beneficial own') > -1 || txt.indexOf('amount and nature') > -1) && (txt.indexOf('name') > -1 || txt.indexOf('beneficial owner') > -1)) {
-                            var rows = tables[t].querySelectorAll('tr');
-                            for (var r = 0; r < rows.length; r++) {
-                                var cell = rows[r].querySelector('td');
-                                if (cell) {
-                                    var ct = cell.textContent.toLowerCase();
-                                    if (ct.indexOf(personName) > -1 || (ct.indexOf(lastName) > -1 && ct.indexOf(firstName) > -1)) {
-                                        rows[r].classList.add('wa-highlight');
-                                        if (!scrollTarget) scrollTarget = rows[r];
-                                    }
-                                }
-                            }
-                            if (!scrollTarget) scrollTarget = tables[t];
-                            break;
-                        }
-                    }
-                    if (scrollTarget) {
-                        setTimeout(function() { scrollTarget.scrollIntoView({ block: 'center' }); }, 100);
-                    }
-                });
-
                 // Intercept internal anchor links so they work inside srcdoc
                 document.addEventListener('click', function(e) {
                     var anchor = e.target.closest('a[href^="#"]');
@@ -891,6 +887,9 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
         `;
 
         let modifiedHtml = makeUrlsAbsolute(fullProxyHtml, docUrl);
+        // Sanitize SEC HTML: strip <script> tags to prevent XSS
+        modifiedHtml = modifiedHtml.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+
         const headClose = modifiedHtml.toLowerCase().indexOf('</head>');
         if (headClose > -1) {
             modifiedHtml = modifiedHtml.substring(0, headClose) + injectedCode + modifiedHtml.substring(headClose);
@@ -898,6 +897,43 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
             modifiedHtml = injectedCode + modifiedHtml;
         }
         iframe.srcdoc = modifiedHtml;
+
+        // Highlight matching row and scroll to it from the parent
+        // (more reliable than injected scripts which have timing issues in srcdoc)
+        iframe.addEventListener('load', function() {
+            try {
+                const doc = iframe.contentDocument;
+                if (!doc) return;
+                const pn = personName.toLowerCase();
+                const pParts = pn.split(/\s+/);
+                const pLast = pParts[pParts.length - 1];
+                const pFirst = pParts[0];
+                const tables = doc.querySelectorAll('table');
+                let scrollTarget = null;
+                for (let t = 0; t < tables.length; t++) {
+                    const txt = tables[t].textContent.toLowerCase();
+                    if ((txt.indexOf('beneficial own') > -1 || txt.indexOf('amount and nature') > -1) &&
+                        (txt.indexOf('name') > -1 || txt.indexOf('beneficial owner') > -1)) {
+                        const rows = tables[t].querySelectorAll('tr');
+                        for (let r = 0; r < rows.length; r++) {
+                            const cell = rows[r].querySelector('td');
+                            if (cell) {
+                                const ct = cell.textContent.replace(/\u00a0/g, ' ').toLowerCase();
+                                if (ct.indexOf(pn) > -1 || (ct.indexOf(pLast) > -1 && ct.indexOf(pFirst) > -1)) {
+                                    rows[r].classList.add('wa-highlight');
+                                    if (!scrollTarget) scrollTarget = rows[r];
+                                }
+                            }
+                        }
+                        if (!scrollTarget) scrollTarget = tables[t];
+                        break;
+                    }
+                }
+                if (scrollTarget) {
+                    setTimeout(() => scrollTarget.scrollIntoView({ block: 'center' }), 100);
+                }
+            } catch (e) { /* cross-origin error, ignore */ }
+        });
     }
 }
 
@@ -949,12 +985,33 @@ function recalculate() {
     badgeEl.innerHTML = '';
 
     const bk = $('calcBreakdown');
-    let lines = `Proxy: <span class="num">${calcProxyShares.toLocaleString()}</span>`;
-    if (totalAdded > 0) lines += ` + <span class="num">${totalAdded.toLocaleString()}</span>`;
-    if (totalSubtracted > 0) lines += ` &minus; <span class="num">${totalSubtracted.toLocaleString()}</span>`;
-    lines += ` = <span class="num">${adjustedBase.toLocaleString()}</span> adj. base`;
-    if (sold > 0) lines += `<br>Sold <span class="num">${sold.toLocaleString()}</span> of <span class="num">${adjustedBase.toLocaleString()}</span>`;
-    bk.innerHTML = lines;
+    bk.textContent = '';
+    function numSpan(value) {
+        const s = document.createElement('span');
+        s.className = 'num';
+        s.textContent = value.toLocaleString();
+        return s;
+    }
+    bk.appendChild(document.createTextNode('Proxy: '));
+    bk.appendChild(numSpan(calcProxyShares));
+    if (totalAdded > 0) {
+        bk.appendChild(document.createTextNode(' + '));
+        bk.appendChild(numSpan(totalAdded));
+    }
+    if (totalSubtracted > 0) {
+        bk.appendChild(document.createTextNode(' \u2212 '));
+        bk.appendChild(numSpan(totalSubtracted));
+    }
+    bk.appendChild(document.createTextNode(' = '));
+    bk.appendChild(numSpan(adjustedBase));
+    bk.appendChild(document.createTextNode(' adj. base'));
+    if (sold > 0) {
+        bk.appendChild(document.createElement('br'));
+        bk.appendChild(document.createTextNode('Sold '));
+        bk.appendChild(numSpan(sold));
+        bk.appendChild(document.createTextNode(' of '));
+        bk.appendChild(numSpan(adjustedBase));
+    }
 }
 
 function showCalc(proxyShares, asOfDate) {
