@@ -913,6 +913,7 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
                     if ((txt.indexOf('beneficial own') > -1 || txt.indexOf('amount and nature') > -1) &&
                         (txt.indexOf('name') > -1 || txt.indexOf('beneficial owner') > -1)) {
                         const rows = tables[t].querySelectorAll('tr');
+                        let foundInTable = false;
                         for (let r = 0; r < rows.length; r++) {
                             const cell = rows[r].querySelector('td');
                             if (cell) {
@@ -920,11 +921,13 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
                                 if (ct.indexOf(pn) > -1 || (ct.indexOf(pLast) > -1 && ct.indexOf(pFirst) > -1)) {
                                     rows[r].classList.add('wa-highlight');
                                     if (!scrollTarget) scrollTarget = rows[r];
+                                    foundInTable = true;
                                 }
                             }
                         }
-                        if (!scrollTarget) scrollTarget = tables[t];
-                        break;
+                        // Only stop if we found the person in this table;
+                        // otherwise keep looking (TOC tables can match headers too)
+                        if (foundInTable) break;
                     }
                 }
                 if (scrollTarget) {
