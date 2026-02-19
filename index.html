@@ -394,7 +394,7 @@
                 <div class="calc-section-title">Shares Sold</div>
                 <div class="calc-row">
                     <label>Shares sold</label>
-                    <input type="text" class="calc-input subtract" id="calcSold" placeholder="0" oninput="recalculate()">
+                    <input type="text" class="calc-input subtract" id="calcSold" placeholder="0" oninput="formatWithCommas(this); recalculate()">
                 </div>
 
                 <hr class="calc-divider">
@@ -402,27 +402,27 @@
                 <div class="calc-section-title" id="adjustTitle">Adjustments since proxy</div>
                 <div class="calc-row">
                     <label style="color:var(--success);">+ Addition 1</label>
-                    <input type="text" class="calc-input add" id="calcAdd1" placeholder="0" oninput="recalculate()">
+                    <input type="text" class="calc-input add" id="calcAdd1" placeholder="0" oninput="formatWithCommas(this); recalculate()">
                 </div>
                 <div class="calc-row">
                     <label style="color:var(--success);">+ Addition 2</label>
-                    <input type="text" class="calc-input add" id="calcAdd2" placeholder="0" oninput="recalculate()">
+                    <input type="text" class="calc-input add" id="calcAdd2" placeholder="0" oninput="formatWithCommas(this); recalculate()">
                 </div>
                 <div class="calc-row">
                     <label style="color:var(--success);">+ Addition 3</label>
-                    <input type="text" class="calc-input add" id="calcAdd3" placeholder="0" oninput="recalculate()">
+                    <input type="text" class="calc-input add" id="calcAdd3" placeholder="0" oninput="formatWithCommas(this); recalculate()">
                 </div>
                 <div class="calc-row" style="margin-top: 6px;">
                     <label style="color:var(--error);">&minus; Subtraction 1</label>
-                    <input type="text" class="calc-input subtract" id="calcSub1" placeholder="0" oninput="recalculate()">
+                    <input type="text" class="calc-input subtract" id="calcSub1" placeholder="0" oninput="formatWithCommas(this); recalculate()">
                 </div>
                 <div class="calc-row">
                     <label style="color:var(--error);">&minus; Subtraction 2</label>
-                    <input type="text" class="calc-input subtract" id="calcSub2" placeholder="0" oninput="recalculate()">
+                    <input type="text" class="calc-input subtract" id="calcSub2" placeholder="0" oninput="formatWithCommas(this); recalculate()">
                 </div>
                 <div class="calc-row">
                     <label style="color:var(--error);">&minus; Subtraction 3</label>
-                    <input type="text" class="calc-input subtract" id="calcSub3" placeholder="0" oninput="recalculate()">
+                    <input type="text" class="calc-input subtract" id="calcSub3" placeholder="0" oninput="formatWithCommas(this); recalculate()">
                 </div>
 
                 <hr class="calc-divider">
@@ -594,6 +594,17 @@ function findAsOfDate(text) {
     return null;
 }
 
+function findAsOfDateStrict(text) {
+    const plain = text.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ')
+        .replace(/&#160;/gi, ' ').replace(/&#xa0;/gi, ' ')
+        .replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+    const p1 = [...plain.matchAll(/beneficial\s+own[^.]{0,120}?as\s+of\s+(?:the\s+close\s+of\s+business\s+on\s+)?(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+    if (p1.length > 0) return p1[p1.length - 1][1].trim();
+    const p2 = [...plain.matchAll(/information[^.]{0,80}?as\s+of\s+(\w+\s+\d{1,2},?\s+\d{4})/gi)];
+    if (p2.length > 0) return p2[p2.length - 1][1].trim();
+    return null;
+}
+
 function findOwnershipTablePositions(html) {
     const positions = [];
     const tableRegex = /<table\b[^>]*>/gi;
@@ -701,7 +712,9 @@ function parseOwnershipFromHtml(html, personName) {
 
         let asOfDate = 'Date not found';
         if (rawPos) {
-            asOfDate = findAsOfDate(rawPos.html) || asOfDate;
+            // High-signal patterns only on table HTML (won't match footnotes)
+            asOfDate = findAsOfDateStrict(rawPos.html) || asOfDate;
+            // Preceding context (where the date usually lives)
             if (asOfDate === 'Date not found') {
                 const nearPreceding = html.substring(Math.max(0, rawPos.start - 3000), rawPos.start);
                 asOfDate = findAsOfDate(nearPreceding) || asOfDate;
@@ -709,6 +722,10 @@ function parseOwnershipFromHtml(html, personName) {
             if (asOfDate === 'Date not found') {
                 const preceding = html.substring(Math.max(0, rawPos.start - 10000), rawPos.start);
                 asOfDate = findAsOfDate(preceding) || asOfDate;
+            }
+            // Last resort: generic patterns on table (may match footnote dates)
+            if (asOfDate === 'Date not found') {
+                asOfDate = findAsOfDate(rawPos.html) || asOfDate;
             }
         }
         if (asOfDate === 'Date not found') {
@@ -943,6 +960,18 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
 // — Calculator —
 let calcProxyShares = 0;
 let calcAsOfDate = '';
+
+function formatWithCommas(el) {
+    const pos = el.selectionStart;
+    const oldVal = el.value;
+    const raw = oldVal.replace(/,/g, '').replace(/[^0-9]/g, '');
+    const formatted = raw.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    if (formatted !== oldVal) {
+        el.value = formatted;
+        const diff = formatted.length - oldVal.length;
+        el.setSelectionRange(pos + diff, pos + diff);
+    }
+}
 
 function parseCalcInput(id) {
     const raw = $(id).value.replace(/,/g, '').trim();
