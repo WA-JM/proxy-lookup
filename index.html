@@ -689,9 +689,10 @@ function parseOwnershipFromHtml(html, personName) {
             const cells = row.querySelectorAll('td');
             if (cells.length < 2) continue;
             const texts = Array.from(cells).map(c => cleanText(c.textContent));
-            if (!texts[0] || texts[0].length < 2) continue;
-            const rowData = { name: texts[0], cells: texts, isMatch: false };
-            if (nameMatches(texts[0], personName)) {
+            let nameIdx = texts.findIndex(t => t.length >= 2);
+            if (nameIdx < 0) continue;
+            const rowData = { name: texts[nameIdx], cells: texts, isMatch: false };
+            if (nameMatches(texts[nameIdx], personName)) {
                 rowData.isMatch = true;
                 let shares = null;
                 if (beneficialCol !== null && beneficialCol < texts.length) {
