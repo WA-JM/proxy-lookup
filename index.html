@@ -365,8 +365,8 @@
         <form id="searchForm">
             <div class="search-row">
                 <div class="form-group">
-                    <label for="ticker">Ticker</label>
-                    <input type="text" id="ticker" placeholder="e.g. AAPL" autocomplete="off" required>
+                    <label for="ticker">Company</label>
+                    <input type="text" id="ticker" placeholder="e.g. AAPL or Apple" autocomplete="off" required>
                 </div>
                 <div class="form-group">
                     <label for="person">Person</label>
@@ -492,12 +492,30 @@ async function resolveTicker(ticker) {
     const resp = await secFetch('https://www.sec.gov/files/company_tickers.json');
     const data = await resp.json();
     const upper = ticker.toUpperCase().trim();
+
+    // Pass 1: exact ticker match
     for (const entry of Object.values(data)) {
         if (entry.ticker.toUpperCase() === upper) {
             return { cik: String(entry.cik_str).padStart(10, '0'), company: entry.title };
         }
     }
-    throw new Error(`Ticker "${ticker}" not found in the SEC database.`);
+
+    // Pass 2: company name match (case-insensitive)
+    const lower = ticker.toLowerCase().trim();
+    const nameMatches = [];
+    for (const entry of Object.values(data)) {
+        if (entry.title.toLowerCase() === lower) {
+            nameMatches.unshift(entry); // exact match goes first
+        } else if (entry.title.toLowerCase().includes(lower)) {
+            nameMatches.push(entry);
+        }
+    }
+    if (nameMatches.length > 0) {
+        const best = nameMatches[0];
+        return { cik: String(best.cik_str).padStart(10, '0'), company: best.title };
+    }
+
+    throw new Error(`"${ticker}" not found in the SEC database.`);
 }
 
 // — Step 2: Find latest DEF 14A —
@@ -934,18 +952,15 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
                         const rows = tables[t].querySelectorAll('tr');
                         let foundInTable = false;
                         for (let r = 0; r < rows.length; r++) {
-                            const cell = rows[r].querySelector('td');
-                            if (cell) {
-                                const ct = cell.textContent.replace(/\u00a0/g, ' ').toLowerCase();
-                                if (ct.indexOf(pn) > -1 || (ct.indexOf(pLast) > -1 && ct.indexOf(pFirst) > -1)) {
-                                    rows[r].classList.add('wa-highlight');
-                                    if (!scrollTarget) scrollTarget = rows[r];
-                                    foundInTable = true;
-                                }
+                            const rowText = rows[r].textContent.replace(/\u00a0/g, ' ').toLowerCase();
+                            if (rowText.indexOf(pn) > -1 || (rowText.indexOf(pLast) > -1 && rowText.indexOf(pFirst) > -1)) {
+                                rows[r].classList.add('wa-highlight');
+                                if (!scrollTarget) scrollTarget = rows[r];
+                                foundInTable = true;
                             }
                         }
-                        // Only stop if we found the person in this table;
-                        // otherwise keep looking (TOC tables can match headers too)
+                        // If person not found in this table, still use the table as scroll target
+                        if (!foundInTable && !scrollTarget) scrollTarget = tables[t];
                         if (foundInTable) break;
                     }
                 }
@@ -1115,7 +1130,8 @@ $('searchForm').addEventListener('submit', async (e) => {
         if (result.found && result.matchedShares !== null) {
             showCalc(result.matchedShares, result.asOfDate);
         } else {
-            hideCalc();
+            const asOf = result.tables?.[0]?.asOfDate || 'proxy date';
+            showCalc(0, asOf);
         }
 
         // Clear progress after a moment
