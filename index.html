@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Proxy Tool | W Advisors</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231a2e4a'/><text x='16' y='23' font-size='14' font-weight='bold' fill='white' text-anchor='middle' font-family='system-ui'>WA</text></svg>">
+    <script>if(window.self!==window.top)document.documentElement.classList.add('embedded');</script>
     <style>
         :root {
             --navy: #1a2e4a;
@@ -52,6 +53,8 @@
             font-weight: 600;
             letter-spacing: -0.3px;
         }
+        html.embedded header { display: none !important; }
+        html.embedded body { overflow: auto; }
 
         /* -- Search Bar -- */
         .search-bar {
@@ -366,11 +369,11 @@
             <div class="search-row">
                 <div class="form-group">
                     <label for="ticker">Company</label>
-                    <input type="text" id="ticker" placeholder="e.g. AAPL or Apple" autocomplete="off" required>
+                    <input type="text" id="ticker" autocomplete="off" required>
                 </div>
                 <div class="form-group">
                     <label for="person">Person</label>
-                    <input type="text" id="person" placeholder="e.g. Pickett or Tim Cook" autocomplete="off" required>
+                    <input type="text" id="person" autocomplete="off" required>
                 </div>
                 <button type="submit" class="btn-search" id="searchBtn">Look Up</button>
                 <div class="progress-inline" id="progressSteps"></div>
@@ -462,12 +465,24 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 const $ = id => document.getElementById(id);
 
 function setSteps(steps) {
-    $('progressSteps').innerHTML = steps.map(s => {
-        const icon = s.status === 'done' ? '&#10003;'
-                   : s.status === 'active' ? '<span class="spinner"></span>'
-                   : '&#8226;';
-        return `<span class="step ${s.status}"><span class="icon">${icon}</span> ${s.label}</span>`;
-    }).join('');
+    const container = $('progressSteps');
+    container.textContent = '';
+    steps.forEach(s => {
+        const span = document.createElement('span');
+        span.className = 'step ' + s.status;
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'icon';
+        if (s.status === 'active') {
+            const spinner = document.createElement('span');
+            spinner.className = 'spinner';
+            iconSpan.appendChild(spinner);
+        } else {
+            iconSpan.textContent = s.status === 'done' ? '\u2713' : '\u2022';
+        }
+        span.appendChild(iconSpan);
+        span.appendChild(document.createTextNode(' ' + (s.label || '')));
+        container.appendChild(span);
+    });
 }
 
 function clearSteps() { $('progressSteps').innerHTML = ''; }
@@ -488,9 +503,17 @@ async function secFetch(url, opts = {}) {
 }
 
 // — Step 1: Resolve ticker → CIK —
+let tickerCache = null;
+let tickerCacheTime = 0;
+const TICKER_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
 async function resolveTicker(ticker) {
-    const resp = await secFetch('https://www.sec.gov/files/company_tickers.json');
-    const data = await resp.json();
+    if (!tickerCache || Date.now() - tickerCacheTime > TICKER_CACHE_TTL) {
+        const resp = await secFetch('https://www.sec.gov/files/company_tickers.json');
+        tickerCache = await resp.json();
+        tickerCacheTime = Date.now();
+    }
+    const data = tickerCache;
     const upper = ticker.toUpperCase().trim();
 
     // Pass 1: exact ticker match
@@ -502,14 +525,18 @@ async function resolveTicker(ticker) {
 
     // Pass 2: company name match (case-insensitive)
     const lower = ticker.toLowerCase().trim();
-    const nameMatches = [];
+    const exactNames = [];
+    const partialNames = [];
     for (const entry of Object.values(data)) {
         if (entry.title.toLowerCase() === lower) {
-            nameMatches.unshift(entry); // exact match goes first
+            exactNames.push(entry);
         } else if (entry.title.toLowerCase().includes(lower)) {
-            nameMatches.push(entry);
+            partialNames.push(entry);
         }
     }
+    // Sort exact matches by lowest CIK (oldest = primary entity)
+    exactNames.sort((a, b) => a.cik_str - b.cik_str);
+    const nameMatches = [...exactNames, ...partialNames];
     if (nameMatches.length > 0) {
         const best = nameMatches[0];
         return { cik: String(best.cik_str).padStart(10, '0'), company: best.title };
@@ -519,20 +546,43 @@ async function resolveTicker(ticker) {
 }
 
 // — Step 2: Find latest DEF 14A —
-async function findLatestProxy(cik) {
-    const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
-    const resp = await secFetch(url);
-    const data = await resp.json();
-    const recent = data?.filings?.recent || {};
-    const forms = recent.form || [];
-    const accessions = recent.accessionNumber || [];
-    const dates = recent.filingDate || [];
-    const docs = recent.primaryDocument || [];
+function searchFilingBatch(batch) {
+    const forms = batch.form || [];
+    const accessions = batch.accessionNumber || [];
+    const dates = batch.filingDate || [];
+    const docs = batch.primaryDocument || [];
     for (let i = 0; i < forms.length; i++) {
         if (forms[i] === 'DEF 14A') {
             return { adsh: accessions[i], filename: docs[i], fileDate: dates[i] };
         }
     }
+    return null;
+}
+
+async function findLatestProxy(cik) {
+    const url = `https://data.sec.gov/submissions/CIK${cik}.json`;
+    const resp = await secFetch(url);
+    const data = await resp.json();
+
+    // Check the recent filings first
+    const recent = data?.filings?.recent || {};
+    const result = searchFilingBatch(recent);
+    if (result) return result;
+
+    // If not found, check paginated filing files for high-volume filers
+    const additionalFiles = data?.filings?.files || [];
+    for (const fileEntry of additionalFiles) {
+        const pageUrl = `https://data.sec.gov/submissions/${fileEntry.name}`;
+        try {
+            const pageResp = await secFetch(pageUrl);
+            const pageBatch = await pageResp.json();
+            const pageResult = searchFilingBatch(pageBatch);
+            if (pageResult) return pageResult;
+        } catch(e) {
+            // Skip failed pages, continue searching
+        }
+    }
+
     throw new Error('No DEF 14A proxy filing found for this company.');
 }
 
@@ -786,6 +836,15 @@ function makeUrlsAbsolute(html, docUrl) {
             }
             return prefix + baseUrl + path + suffix;
         });
+    // Fix <link href> stylesheet references (relative → absolute)
+    html = html.replace(/(<link\b[^>]*?\bhref\s*=\s*["'])(?!https?:\/\/|data:|#)([^"']+)(["'])/gi,
+        (match, prefix, path, suffix) => {
+            if (path.startsWith('/')) {
+                const origin = new URL(docUrl).origin;
+                return prefix + origin + path + suffix;
+            }
+            return prefix + baseUrl + path + suffix;
+        });
     // Also fix background image url() references
     html = html.replace(/(url\(\s*["']?)(?!https?:\/\/|data:|#)([^"')]+)(["']?\s*\))/gi,
         (match, prefix, path, suffix) => {
@@ -893,9 +952,13 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
         if (oldIframe) oldIframe.remove();
 
         const iframe = document.createElement('iframe');
-        iframe.sandbox = 'allow-same-origin allow-scripts';
+        iframe.sandbox = 'allow-scripts';
         rightPanel.appendChild(iframe);
 
+        // Build injected code with person name for in-iframe highlighting/scrolling
+        // (Parent can't access iframe.contentDocument due to sandbox lacking allow-same-origin,
+        //  so highlighting + scrolling must run inside the iframe itself.)
+        const escapedPersonName = JSON.stringify(personName);
         const injectedCode = `
             <style>
                 tr.wa-highlight td {
@@ -920,6 +983,41 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
                         target.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }
                 });
+
+                // Highlight matching person and scroll to ownership table
+                window.addEventListener('load', function() {
+                    var pn = ${escapedPersonName}.toLowerCase();
+                    var pParts = pn.split(/\\s+/);
+                    var pLast = pParts[pParts.length - 1];
+                    var pFirst = pParts[0];
+                    var tables = document.querySelectorAll('table');
+                    var scrollTarget = null;
+                    var lastOwnershipTable = null;
+                    for (var t = 0; t < tables.length; t++) {
+                        var txt = tables[t].textContent;
+                        var lower = txt.toLowerCase();
+                        if ((lower.indexOf('beneficial') > -1 || lower.indexOf('amount and nature') > -1) &&
+                            (lower.indexOf('name') > -1 || lower.indexOf('beneficial owner') > -1) &&
+                            /\\d{1,3}(,\\d{3})+/.test(txt)) {
+                            lastOwnershipTable = tables[t];
+                            var rows = tables[t].querySelectorAll('tr');
+                            var foundInTable = false;
+                            for (var r = 0; r < rows.length; r++) {
+                                var rowText = rows[r].textContent.replace(/\\u00a0/g, ' ').toLowerCase();
+                                if (rowText.indexOf(pn) > -1 || (rowText.indexOf(pLast) > -1 && rowText.indexOf(pFirst) > -1)) {
+                                    rows[r].classList.add('wa-highlight');
+                                    if (!scrollTarget) scrollTarget = rows[r];
+                                    foundInTable = true;
+                                }
+                            }
+                            if (foundInTable) break;
+                        }
+                    }
+                    if (!scrollTarget && lastOwnershipTable) scrollTarget = lastOwnershipTable;
+                    if (scrollTarget) {
+                        setTimeout(function() { scrollTarget.scrollIntoView({ block: 'center' }); }, 150);
+                    }
+                });
             <\/script>
         `;
 
@@ -933,45 +1031,6 @@ function renderResults(result, company, ticker, personName, fileDate, docUrl, fu
         } else {
             modifiedHtml = injectedCode + modifiedHtml;
         }
-        // Highlight matching row and scroll to it from the parent
-        // Attach listener BEFORE setting srcdoc to avoid race condition
-        iframe.addEventListener('load', function onIframeLoad() {
-            try {
-                const doc = iframe.contentDocument;
-                if (!doc || !doc.body || doc.body.children.length === 0) return;
-                const pn = personName.toLowerCase();
-                const pParts = pn.split(/\s+/);
-                const pLast = pParts[pParts.length - 1];
-                const pFirst = pParts[0];
-                const tables = doc.querySelectorAll('table');
-                let scrollTarget = null;
-                let lastOwnershipTable = null;
-                for (let t = 0; t < tables.length; t++) {
-                    const txt = tables[t].textContent;
-                    const lower = txt.toLowerCase();
-                    if ((lower.indexOf('beneficial') > -1 || lower.indexOf('amount and nature') > -1) &&
-                        (lower.indexOf('name') > -1 || lower.indexOf('beneficial owner') > -1) &&
-                        /\d{1,3}(,\d{3})+/.test(txt)) {
-                        lastOwnershipTable = tables[t];
-                        const rows = tables[t].querySelectorAll('tr');
-                        let foundInTable = false;
-                        for (let r = 0; r < rows.length; r++) {
-                            const rowText = rows[r].textContent.replace(/\u00a0/g, ' ').toLowerCase();
-                            if (rowText.indexOf(pn) > -1 || (rowText.indexOf(pLast) > -1 && rowText.indexOf(pFirst) > -1)) {
-                                rows[r].classList.add('wa-highlight');
-                                if (!scrollTarget) scrollTarget = rows[r];
-                                foundInTable = true;
-                            }
-                        }
-                        if (foundInTable) break;
-                    }
-                }
-                if (!scrollTarget && lastOwnershipTable) scrollTarget = lastOwnershipTable;
-                if (scrollTarget) {
-                    setTimeout(() => scrollTarget.scrollIntoView({ block: 'center' }), 100);
-                }
-            } catch (e) { /* cross-origin error, ignore */ }
-        });
         iframe.srcdoc = modifiedHtml;
     }
 }
