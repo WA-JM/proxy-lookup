@@ -495,23 +495,46 @@ function showError(msg) {
 function clearError() { $('errorMsg').classList.remove('visible'); }
 
 // — Fetch with SEC-friendly headers —
+// Retry transient SEC failures (403/429/5xx) with exponential backoff. SEC rate-limits
+// the Cloudflare worker's shared egress IPs, producing sporadic 403s — usually one retry
+// after a short pause is enough to land on a different upstream window.
 async function secFetch(url, opts = {}) {
     const proxyUrl = `${PROXY_BASE}/?url=${encodeURIComponent(url)}`;
-    const resp = await fetch(proxyUrl, { ...opts });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
-    return resp;
+    const RETRYABLE = new Set([403, 429, 500, 502, 503, 504]);
+    const delays = [400, 1200, 2500]; // 4 attempts total
+    let lastStatus = 0;
+    for (let i = 0; i <= delays.length; i++) {
+        const resp = await fetch(proxyUrl, { ...opts });
+        if (resp.ok) return resp;
+        lastStatus = resp.status;
+        if (!RETRYABLE.has(resp.status) || i === delays.length) break;
+        await delay(delays[i]);
+    }
+    throw new Error(`HTTP ${lastStatus} fetching ${url}`);
 }
 
 // — Step 1: Resolve ticker → CIK —
+// Ticker map is reloaded from SEC on a 24h cadence; persisted to localStorage so a tab
+// reload (or fresh iframe in the Signal Tracker Proxy tab) doesn't trigger an SEC hit.
+const TICKER_LS_KEY = 'sec_ticker_cache_v1';
+const TICKER_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 let tickerCache = null;
 let tickerCacheTime = 0;
-const TICKER_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+try {
+    const cached = JSON.parse(localStorage.getItem(TICKER_LS_KEY) || 'null');
+    if (cached && cached.t && Date.now() - cached.t < TICKER_CACHE_TTL) {
+        tickerCache = cached.data;
+        tickerCacheTime = cached.t;
+    }
+} catch (_) { /* ignore corrupt cache */ }
 
 async function resolveTicker(ticker) {
     if (!tickerCache || Date.now() - tickerCacheTime > TICKER_CACHE_TTL) {
         const resp = await secFetch('https://www.sec.gov/files/company_tickers.json');
         tickerCache = await resp.json();
         tickerCacheTime = Date.now();
+        try { localStorage.setItem(TICKER_LS_KEY, JSON.stringify({ t: tickerCacheTime, data: tickerCache })); }
+        catch (_) { /* quota exceeded — fine, in-memory cache still works */ }
     }
     const data = tickerCache;
     const upper = ticker.toUpperCase().trim();
