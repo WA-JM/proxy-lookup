@@ -501,16 +501,24 @@ function clearError() { $('errorMsg').classList.remove('visible'); }
 async function secFetch(url, opts = {}) {
     const proxyUrl = `${PROXY_BASE}/?url=${encodeURIComponent(url)}`;
     const RETRYABLE = new Set([403, 429, 500, 502, 503, 504]);
-    const delays = [400, 1200, 2500]; // 4 attempts total
+    // SEC throttles www.sec.gov per egress IP; the Cloudflare worker shares its IP pool,
+    // so throttle windows can run 10s+. Ride them out with a longer ladder + jitter
+    // (jitter de-syncs concurrent tabs so they don't all retry on the same beat).
+    const delays = [500, 1200, 2500, 5000, 8000]; // 6 attempts, ~17s worst case
     let lastStatus = 0;
     for (let i = 0; i <= delays.length; i++) {
         const resp = await fetch(proxyUrl, { ...opts });
         if (resp.ok) return resp;
         lastStatus = resp.status;
         if (!RETRYABLE.has(resp.status) || i === delays.length) break;
-        await delay(delays[i]);
+        await delay(delays[i] + Math.floor(Math.random() * 400));
     }
-    throw new Error(`HTTP ${lastStatus} fetching ${url}`);
+    const friendly = (lastStatus === 429 || lastStatus === 403)
+        ? `SEC is rate-limiting requests right now (HTTP ${lastStatus}). This is usually brief — click Look Up again in a few seconds.`
+        : `HTTP ${lastStatus} fetching ${url}`;
+    const err = new Error(friendly);
+    err.status = lastStatus;
+    throw err;
 }
 
 // — Step 1: Resolve ticker → CIK —
@@ -520,21 +528,38 @@ const TICKER_LS_KEY = 'sec_ticker_cache_v1';
 const TICKER_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 let tickerCache = null;
 let tickerCacheTime = 0;
+let staleTickerCache = null; // last-known-good map, kept even past TTL — used as a 429 fallback
 try {
     const cached = JSON.parse(localStorage.getItem(TICKER_LS_KEY) || 'null');
-    if (cached && cached.t && Date.now() - cached.t < TICKER_CACHE_TTL) {
-        tickerCache = cached.data;
-        tickerCacheTime = cached.t;
+    if (cached && cached.data) {
+        staleTickerCache = cached.data; // always retain, regardless of age
+        if (cached.t && Date.now() - cached.t < TICKER_CACHE_TTL) {
+            tickerCache = cached.data;
+            tickerCacheTime = cached.t;
+        }
     }
 } catch (_) { /* ignore corrupt cache */ }
 
 async function resolveTicker(ticker) {
     if (!tickerCache || Date.now() - tickerCacheTime > TICKER_CACHE_TTL) {
-        const resp = await secFetch('https://www.sec.gov/files/company_tickers.json');
-        tickerCache = await resp.json();
-        tickerCacheTime = Date.now();
-        try { localStorage.setItem(TICKER_LS_KEY, JSON.stringify({ t: tickerCacheTime, data: tickerCache })); }
-        catch (_) { /* quota exceeded — fine, in-memory cache still works */ }
+        try {
+            const resp = await secFetch('https://www.sec.gov/files/company_tickers.json');
+            tickerCache = await resp.json();
+            tickerCacheTime = Date.now();
+            staleTickerCache = tickerCache;
+            try { localStorage.setItem(TICKER_LS_KEY, JSON.stringify({ t: tickerCacheTime, data: tickerCache })); }
+            catch (_) { /* quota exceeded — fine, in-memory cache still works */ }
+        } catch (err) {
+            // SEC threw after all retries. The ticker→CIK map is extremely stable, so a
+            // last-known-good copy is safe to reuse rather than failing the whole lookup.
+            if (staleTickerCache) {
+                tickerCache = staleTickerCache;
+                tickerCacheTime = Date.now(); // trust it for this session; reload refreshes
+                console.warn('SEC throttled the ticker map; using last-known-good cached copy.', err);
+            } else {
+                throw err; // truly first-ever load with nothing cached: surface the friendly 429 msg
+            }
+        }
     }
     const data = tickerCache;
     const upper = ticker.toUpperCase().trim();
